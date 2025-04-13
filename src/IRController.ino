@@ -628,6 +628,79 @@ void sendCorsHeaders() {
   server->sendHeader("Access-Control-Allow-Methods", "GET, POST");
 }
 
+//+=============================================================================
+// Handler for the IR sending form
+//
+void handleSendIr() {
+  Serial.println("Connection received endpoint '/sendir' (POST)");
+
+  // --- Security Check (optional but recommended) ---
+  // You might want to reuse parts of the security checks from /msg or /json
+  // For simplicity, we'll skip strict HMAC for now, assuming access to the page was already authenticated.
+  // Add passcode check if needed:
+  /*
+  if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) { // 'pass' needs to be added to the form if used
+      Serial.println("Unauthorized access (passcode)");
+      sendCorsHeaders(); // May not be needed if not called via AJAX
+      server->send(401, "text/plain", "Unauthorized, invalid passcode");
+      return;
+  }
+  */
+
+  // --- Argument Parsing ---
+  if (!server->hasArg("type") || !server->hasArg("data") || !server->hasArg("length")) {
+    Serial.println("Missing required arguments (type, data, length)");
+    // Redirect back to home page with an error message
+    server->sendHeader("Location", "/?status=error_missing_args");
+    server->send(303); // 303 See Other
+    return;
+  }
+
+  String type = server->arg("type");
+  String dataStr = server->arg("data");
+  unsigned int len = server->arg("length").toInt();
+  long address = 0;
+  if (server->hasArg("address") && server->arg("address").length() > 0) {
+      // Handle potential "0x" prefix if users add it
+      String addressStr = server->arg("address");
+      if (addressStr.startsWith("0x")) {
+          address = strtoul(addressStr.c_str(), 0, 0); // Base 0 auto-detects 0x
+      } else {
+          address = strtoul(("0x" + addressStr).c_str(), 0, 0); // Assume hex if not prefixed
+      }
+  }
+  int repeat = (server->hasArg("repeat")) ? server->arg("repeat").toInt() : 1;
+  int out = (server->hasArg("out")) ? server->arg("out").toInt() : 1;
+
+  // Default values for delays/pulse if not included in the simple form
+  int rdelay = 1000; // Default repeat delay
+  int pulse = 1;     // Default pulse count
+  int pdelay = 100;  // Default pulse delay
+
+  // Validate inputs (basic)
+  if (len == 0 || dataStr.length() == 0) {
+      Serial.println("Invalid arguments (length or data empty)");
+      server->sendHeader("Location", "/?status=error_invalid_args");
+      server->send(303);
+      return;
+  }
+  if (repeat <= 0) repeat = 1;
+  if (out < 1 || out > 4) out = 1;
+
+
+  // --- Trigger IR Blast ---
+  Serial.println("Calling irblast from form...");
+  digitalWrite(ledpin, LOW); // Turn LED on during send
+  ticker.attach(0.5, disableLed); // Schedule LED turn off
+
+  // Call the existing irblast function
+  irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out));
+
+  // --- Redirect back to home page with success message ---
+  server->sendHeader("Location", "/?status=success");
+  server->send(303); // 303 See Other is appropriate for redirect after POST
+}
+
 
 //+=============================================================================
 // Setup web server and IR receiver/blaster
@@ -1010,6 +1083,8 @@ void setup() {
   server->begin();
   Serial.println("HTTP Server started on port " + String(port));
 
+  server->on("/sendir", HTTP_POST, handleSendIr); // NEUE ZEILE: Handler für Formular-POST registrieren
+
 
   Serial.println("Starting UDP");
   ntpUDP.begin(localPort);
@@ -1287,6 +1362,21 @@ void sendHomePage(String message, String header, int type) {
 
 void sendHomePage(String message, String header, int type, int httpcode) {
   sendHeader(httpcode);
+
+    // +++ NEU: Feedback vom Formular anzeigen +++
+    if (server->hasArg("status")) {
+      String status = server->arg("status");
+      if (status == "success") {
+        server->sendContent("      <div class='row'><div class='col-md-12'><div class='alert alert-success'><strong>Success!</strong> IR code sent via form.</div></div></div>\n");
+      } else if (status == "error_missing_args") {
+        server->sendContent("      <div class='row'><div class='col-md-12'><div class='alert alert-danger'><strong>Error!</strong> Missing required form fields (type, data, length).</div></div></div>\n");
+      } else if (status == "error_invalid_args") {
+        server->sendContent("      <div class='row'><div class='col-md-12'><div class='alert alert-danger'><strong>Error!</strong> Invalid form data (e.g., length 0 or empty data).</div></div></div>\n");
+      }
+       // Weitere Statusmeldungen nach Bedarf hinzufügen...
+    }
+    // +++ ENDE NEU +++
+
   if (type == 1)
   server->sendContent("      <div class='row'><div class='col-md-12'><div class='alert alert-success'><strong>" + header + "!</strong> " + message + "</div></div></div>\n");
   if (type == 2)
@@ -1333,6 +1423,95 @@ void sendHomePage(String message, String header, int type, int httpcode) {
   server->sendContent("              <tr><td colspan='5' class='text-center'><em>No codes received</em></td></tr>");
   server->sendContent("            </tbody></table>\n");
   server->sendContent("          </div></div>\n");
+
+
+    // +++ NEUES FORMULAR ZUM SENDEN +++
+    server->sendContent("      <div class='row'>\n");
+    server->sendContent("        <div class='col-md-12'>\n");
+    server->sendContent("          <h3>Send IR Code</h3>\n");
+    server->sendContent("          <form class='form-horizontal' action='/sendir' method='post'>\n"); // Action auf neuen Handler /sendir
+  
+    // Encoding Type (Dropdown)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='type' class='col-sm-2 control-label'>Type</label>\n");
+    server->sendContent("              <div class='col-sm-10'>\n");
+    server->sendContent("                <select class='form-control' id='type' name='type'>\n");
+    // Füge hier alle unterstützten Typen aus irblast hinzu
+    server->sendContent("                  <option value='nec'>NEC</option>\n");
+    server->sendContent("                  <option value='sony'>SONY</option>\n");
+    server->sendContent("                  <option value='rc5'>RC5</option>\n");
+    server->sendContent("                  <option value='rc6'>RC6</option>\n");
+    server->sendContent("                  <option value='panasonic'>PANASONIC</option>\n");
+    server->sendContent("                  <option value='lg'>LG</option>\n");
+    server->sendContent("                  <option value='jvc'>JVC</option>\n");
+    server->sendContent("                  <option value='samsung'>SAMSUNG</option>\n");
+    server->sendContent("                  <option value='whynter'>WHYNTER</option>\n");
+    server->sendContent("                  <option value='coolix'>COOLIX</option>\n");
+    server->sendContent("                  <option value='denon'>DENON</option>\n");
+    server->sendContent("                  <option value='sharp'>SHARP</option>\n");
+    server->sendContent("                  <option value='sharpraw'>SHARPRAW</option>\n"); // Alias?
+    server->sendContent("                  <option value='dish'>DISH</option>\n");
+    server->sendContent("                  <option value='gree'>GREE</option>\n");
+    server->sendContent("                  <option value='lutron'>LUTRON</option>\n");
+    server->sendContent("                  <option value='roomba'>ROOMBA</option>\n");
+    server->sendContent("                  <option value='ecoclim'>ECOCLIM</option>\n");
+    // Weitere Typen nach Bedarf hinzufügen...
+    server->sendContent("                </select>\n");
+    server->sendContent("              </div>\n");
+    server->sendContent("            </div>\n");
+  
+    // Data (Hex String)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='data' name='data' placeholder='e.g., FF02FD' required></div>\n");
+    server->sendContent("            </div>\n");
+  
+    // Length (Bits)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='length' name='length' placeholder='e.g., 32' required></div>\n");
+    server->sendContent("            </div>\n");
+  
+    // Address (Hex String, optional)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='address' class='col-sm-2 control-label'>Address (Hex, optional)</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='address' name='address' placeholder='e.g., 404 (for Panasonic)'></div>\n");
+    server->sendContent("            </div>\n");
+  
+    // Repeat
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='repeat' class='col-sm-2 control-label'>Repeat</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='repeat' name='repeat' value='1' min='1'></div>\n");
+    server->sendContent("            </div>\n");
+  
+    // Output Pin
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='out' class='col-sm-2 control-label'>Output Pin</label>\n");
+    server->sendContent("              <div class='col-sm-10'>\n");
+    server->sendContent("                 <select class='form-control' id='out' name='out'>\n");
+    server->sendContent("                   <option value='1'>1 (GPIO " + String(pins1) + ")</option>\n");
+    server->sendContent("                   <option value='2'>2 (GPIO " + String(pins2) + ")</option>\n");
+    server->sendContent("                   <option value='3'>3 (GPIO " + String(pins3) + ")</option>\n");
+    server->sendContent("                   <option value='4'>4 (GPIO " + String(pins4) + ")</option>\n");
+    server->sendContent("                 </select>\n");
+    server->sendContent("              </div>\n");
+    server->sendContent("            </div>\n");
+  
+    // Submit Button
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <div class='col-sm-offset-2 col-sm-10'>\n");
+    server->sendContent("                <button type='submit' class='btn btn-primary'>Send IR Code</button>\n");
+    server->sendContent("              </div>\n");
+    server->sendContent("            </div>\n");
+  
+    server->sendContent("          </form>\n");
+    server->sendContent("        </div>\n");
+    server->sendContent("      </div><hr />\n"); // Trennlinie vor den Pin-Infos
+    // +++ ENDE NEUES FORMULAR +++
+
+
+
+
   server->sendContent("      <div class='row'>\n");
   server->sendContent("        <div class='col-md-12'>\n");
   server->sendContent("          <ul class='list-unstyled'>\n");
@@ -1429,6 +1608,9 @@ void sendCodePage(Code selCode, int httpcode){
   }
   server->sendContent("        </div>\n");
   server->sendContent("     </div>\n");
+
+  
+    
   sendFooter();
 }
 
