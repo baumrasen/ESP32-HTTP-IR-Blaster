@@ -113,6 +113,9 @@ class Code {
     int bits = 0;
     time_t timestamp = 0;
     bool valid = false;
+    // +++ NEUE MEMBER +++
+    int repeat = 1; // Default repeat count
+    int out = 1;    // Default output pin
 };
 
 // Declare prototypes
@@ -694,7 +697,10 @@ void handleSendIr() {
   ticker.attach(0.5, disableLed); // Schedule LED turn off
 
   // Call the existing irblast function
-  irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out));
+// OLD: irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out));
+// NEW: Pass 'out' as the last argument
+irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
+
 
   // --- Redirect back to home page with success message ---
   server->sendHeader("Location", "/?status=success");
@@ -908,10 +914,14 @@ void setup() {
             JsonArray raw = root[x]["data"]; // Array of unsigned int values for the raw signal
             int khz = root[x]["khz"];
             if (khz <= 0) khz = 38; // Default to 38khz if not set
-            rawblast(raw, khz, rdelay, pulse, pdelay, repeat, pickIRsend(xout),duty);
+            // OLD: rawblast(raw, khz, rdelay, pulse, pdelay, repeat, pickIRsend(xout),duty);
+            // NEW: Pass 'xout' as the last argument
+            rawblast(raw, khz, rdelay, pulse, pdelay, repeat, pickIRsend(xout), duty, xout);
           } else if (type == "pronto") {
             JsonArray pdata = root[x]["data"]; // Array of values for pronto
-            pronto(pdata, rdelay, pulse, pdelay, repeat, pickIRsend(xout));
+            // OLD: pronto(pdata, rdelay, pulse, pdelay, repeat, pickIRsend(xout));
+            // NEW: Pass 'xout' as the last argument
+            pronto(pdata, rdelay, pulse, pdelay, repeat, pickIRsend(xout), xout);
           } else if (type == "roku") {
             String data = root[x]["data"];
             rokuCommand(ip, data, repeat, rdelay);
@@ -920,7 +930,9 @@ void setup() {
             String addressString = root[x]["address"];
             long address = strtoul(addressString.c_str(), 0, 0);
             int len = root[x]["length"];
-            irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(xout));
+            // OLD: irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(xout));
+            // NEW: Pass 'xout' as the last argument
+            irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(xout), xout);
           }
         }
 
@@ -1017,7 +1029,9 @@ void setup() {
       if (type == "roku") {
         rokuCommand(ip, data, repeat, rdelay);
       } else {
-        irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out));
+        // OLD: irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out));
+        // NEW: Pass 'out' as the last argument
+        irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
       }
 
       if (!simple) {
@@ -1215,6 +1229,24 @@ int rokuCommand(String ip, String data, int repeat, int rdelay) {
 
     if (r + 1 < repeat) delay(rdelay);
   }
+
+  // +++ NEUE ZEILEN (nach dem Loop) +++
+  // Store info about the *last* command sent in the loop
+  copyCode(last_send_4, last_send_5);
+  copyCode(last_send_3, last_send_4);
+  copyCode(last_send_2, last_send_3);
+  copyCode(last_send, last_send_2);
+
+  strncpy(last_send.data, data.c_str(), 40);
+  last_send.bits = 1; // Roku doesn't have bits in the same way
+  strncpy(last_send.encoding, "roku", 14);
+  strncpy(last_send.address, ip.c_str(), 20); // Store IP as address
+  last_send.timestamp = now();
+  last_send.valid = true;
+  last_send.repeat = repeat; // Store repeat count
+  last_send.out = 1; // Default out pin for Roku
+  // +++ ENDE NEUE ZEILEN +++
+
   return output;
 }
 
@@ -1363,6 +1395,7 @@ void sendHomePage(String message, String header, int type) {
 void sendHomePage(String message, String header, int type, int httpcode) {
   sendHeader(httpcode);
 
+
     // +++ NEU: Feedback vom Formular anzeigen +++
     if (server->hasArg("status")) {
       String status = server->arg("status");
@@ -1387,20 +1420,21 @@ void sendHomePage(String message, String header, int type, int httpcode) {
   server->sendContent("        <div class='col-md-12'>\n");
   server->sendContent("          <h3>Codes Transmitted</h3>\n");
   server->sendContent("          <table class='table table-striped' style='table-layout: fixed;'>\n");
-  server->sendContent("            <thead><tr><th>Sent</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th></tr></thead>\n"); //Title
+  server->sendContent("            <thead><tr><th>Sent</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th></tr></thead>\n"); // Added Repeat/Out
   server->sendContent("            <tbody>\n");
-  if (last_send.valid)
-  server->sendContent("              <tr class='text-uppercase'><td>" + epochToString(last_send.timestamp) + "</td><td><code>" + String(last_send.data) + "</code></td><td><code>" + String(last_send.encoding) + "</code></td><td><code>" + String(last_send.bits) + "</code></td><td><code>" + String(last_send.address) + "</code></td></tr>\n");
-  if (last_send_2.valid)
-  server->sendContent("              <tr class='text-uppercase'><td>" + epochToString(last_send_2.timestamp) + "</td><td><code>" + String(last_send_2.data) + "</code></td><td><code>" + String(last_send_2.encoding) + "</code></td><td><code>" + String(last_send_2.bits) + "</code></td><td><code>" + String(last_send_2.address) + "</code></td></tr>\n");
-  if (last_send_3.valid)
-  server->sendContent("              <tr class='text-uppercase'><td>" + epochToString(last_send_3.timestamp) + "</td><td><code>" + String(last_send_3.data) + "</code></td><td><code>" + String(last_send_3.encoding) + "</code></td><td><code>" + String(last_send_3.bits) + "</code></td><td><code>" + String(last_send_3.address) + "</code></td></tr>\n");
-  if (last_send_4.valid)
-  server->sendContent("              <tr class='text-uppercase'><td>" + epochToString(last_send_4.timestamp) + "</td><td><code>" + String(last_send_4.data) + "</code></td><td><code>" + String(last_send_4.encoding) + "</code></td><td><code>" + String(last_send_4.bits) + "</code></td><td><code>" + String(last_send_4.address) + "</code></td></tr>\n");
-  if (last_send_5.valid)
-  server->sendContent("              <tr class='text-uppercase'><td>" + epochToString(last_send_5.timestamp) + "</td><td><code>" + String(last_send_5.data) + "</code></td><td><code>" + String(last_send_5.encoding) + "</code></td><td><code>" + String(last_send_5.bits) + "</code></td><td><code>" + String(last_send_5.address) + "</code></td></tr>\n");
+  // Helper to generate table row for sent codes
+  auto generateSentRow = [&](const Code& code) {
+      if (code.valid) {
+          server->sendContent("              <tr class='text-uppercase'><td>" + epochToString(code.timestamp) + "</td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td><td><code>" + String(code.repeat) + "</code></td><td><code>" + String(code.out) + "</code></td></tr>\n");
+      }
+  };
+  generateSentRow(last_send);
+  generateSentRow(last_send_2);
+  generateSentRow(last_send_3);
+  generateSentRow(last_send_4);
+  generateSentRow(last_send_5);
   if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
-  server->sendContent("              <tr><td colspan='5' class='text-center'><em>No codes sent</em></td></tr>");
+  server->sendContent("              <tr><td colspan='7' class='text-center'><em>No codes sent</em></td></tr>"); // Colspan updated to 7
   server->sendContent("            </tbody></table>\n");
   server->sendContent("          </div></div>\n");
   server->sendContent("      <div class='row'>\n");
@@ -1422,94 +1456,126 @@ void sendHomePage(String message, String header, int type, int httpcode) {
   if (!last_recv.valid && !last_recv_2.valid && !last_recv_3.valid && !last_recv_4.valid && !last_recv_5.valid)
   server->sendContent("              <tr><td colspan='5' class='text-center'><em>No codes received</em></td></tr>");
   server->sendContent("            </tbody></table>\n");
-  server->sendContent("          </div></div>\n");
+  server->sendContent("          </div></div><hr />\n"); // Moved HR here
+
+// +++ KORRIGIERTES FORMULAR ZUM SENDEN +++
+server->sendContent("      <div class='row'>\n");
+server->sendContent("        <div class='col-md-12'>\n");
+server->sendContent("          <h3>Send IR Code</h3>\n");
+server->sendContent("          <form class='form-horizontal' action='/sendir' method='post'>\n");
+
+// --- Hilfsvariablen für Pre-Filling ---
+// Prüft, ob last_send gültig ist und weist entweder den letzten Wert oder einen Standardwert zu.
+// --- KORREKTUR für toLowerCase() ---
+String tempEncoding = "nec"; // Default
+if (last_send.valid) {
+    tempEncoding = String(last_send.encoding); // Zuerst kopieren
+    tempEncoding.toLowerCase(); // Dann die Kopie ändern
+}
+String lastEncoding = tempEncoding; // Die (ggf. geänderte) Kopie zuweisen
+// --- ENDE KORREKTUR ---
+String lastData = last_send.valid ? String(last_send.data) : "";
+String lastBits = last_send.valid ? String(last_send.bits) : "";
+String lastAddress = last_send.valid ? String(last_send.address) : "";
+// Optional: "0x" vom Adress-String entfernen für die Anzeige
+// if (lastAddress.startsWith("0x")) { lastAddress = lastAddress.substring(2); }
+String lastRepeat = last_send.valid ? String(last_send.repeat) : "1"; // Default 1
+String lastOut = last_send.valid ? String(last_send.out) : "1";       // Default 1
+// --- Ende Hilfsvariablen ---
+
+// --- Lambda-Funktionen NACH den Variablen definieren ---
+auto addSelected = [&](const String& val) {
+    return (val.equalsIgnoreCase(lastEncoding)) ? " selected" : "";
+};
+auto addOutSelected = [&](const String& val) {
+    return (val == lastOut) ? " selected" : "";
+};
+// --- Ende Lambda-Funktionen ---
 
 
-    // +++ NEUES FORMULAR ZUM SENDEN +++
-    server->sendContent("      <div class='row'>\n");
-    server->sendContent("        <div class='col-md-12'>\n");
-    server->sendContent("          <h3>Send IR Code</h3>\n");
-    server->sendContent("          <form class='form-horizontal' action='/sendir' method='post'>\n"); // Action auf neuen Handler /sendir
-  
-    // Encoding Type (Dropdown)
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='type' class='col-sm-2 control-label'>Type</label>\n");
-    server->sendContent("              <div class='col-sm-10'>\n");
-    server->sendContent("                <select class='form-control' id='type' name='type'>\n");
-    // Füge hier alle unterstützten Typen aus irblast hinzu
-    server->sendContent("                  <option value='nec'>NEC</option>\n");
-    server->sendContent("                  <option value='sony'>SONY</option>\n");
-    server->sendContent("                  <option value='rc5'>RC5</option>\n");
-    server->sendContent("                  <option value='rc6'>RC6</option>\n");
-    server->sendContent("                  <option value='panasonic'>PANASONIC</option>\n");
-    server->sendContent("                  <option value='lg'>LG</option>\n");
-    server->sendContent("                  <option value='jvc'>JVC</option>\n");
-    server->sendContent("                  <option value='samsung'>SAMSUNG</option>\n");
-    server->sendContent("                  <option value='whynter'>WHYNTER</option>\n");
-    server->sendContent("                  <option value='coolix'>COOLIX</option>\n");
-    server->sendContent("                  <option value='denon'>DENON</option>\n");
-    server->sendContent("                  <option value='sharp'>SHARP</option>\n");
-    server->sendContent("                  <option value='sharpraw'>SHARPRAW</option>\n"); // Alias?
-    server->sendContent("                  <option value='dish'>DISH</option>\n");
-    server->sendContent("                  <option value='gree'>GREE</option>\n");
-    server->sendContent("                  <option value='lutron'>LUTRON</option>\n");
-    server->sendContent("                  <option value='roomba'>ROOMBA</option>\n");
-    server->sendContent("                  <option value='ecoclim'>ECOCLIM</option>\n");
-    // Weitere Typen nach Bedarf hinzufügen...
-    server->sendContent("                </select>\n");
-    server->sendContent("              </div>\n");
-    server->sendContent("            </div>\n");
-  
-    // Data (Hex String)
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
-    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='data' name='data' placeholder='e.g., FF02FD' required></div>\n");
-    server->sendContent("            </div>\n");
-  
-    // Length (Bits)
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
-    server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='length' name='length' placeholder='e.g., 32' required></div>\n");
-    server->sendContent("            </div>\n");
-  
-    // Address (Hex String, optional)
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='address' class='col-sm-2 control-label'>Address (Hex, optional)</label>\n");
-    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='address' name='address' placeholder='e.g., 404 (for Panasonic)'></div>\n");
-    server->sendContent("            </div>\n");
-  
-    // Repeat
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='repeat' class='col-sm-2 control-label'>Repeat</label>\n");
-    server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='repeat' name='repeat' value='1' min='1'></div>\n");
-    server->sendContent("            </div>\n");
-  
-    // Output Pin
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='out' class='col-sm-2 control-label'>Output Pin</label>\n");
-    server->sendContent("              <div class='col-sm-10'>\n");
-    server->sendContent("                 <select class='form-control' id='out' name='out'>\n");
-    server->sendContent("                   <option value='1'>1 (GPIO " + String(pins1) + ")</option>\n");
-    server->sendContent("                   <option value='2'>2 (GPIO " + String(pins2) + ")</option>\n");
-    server->sendContent("                   <option value='3'>3 (GPIO " + String(pins3) + ")</option>\n");
-    server->sendContent("                   <option value='4'>4 (GPIO " + String(pins4) + ")</option>\n");
-    server->sendContent("                 </select>\n");
-    server->sendContent("              </div>\n");
-    server->sendContent("            </div>\n");
-  
-    // Submit Button
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <div class='col-sm-offset-2 col-sm-10'>\n");
-    server->sendContent("                <button type='submit' class='btn btn-primary'>Send IR Code</button>\n");
-    server->sendContent("              </div>\n");
-    server->sendContent("            </div>\n");
-  
-    server->sendContent("          </form>\n");
-    server->sendContent("        </div>\n");
-    server->sendContent("      </div><hr />\n"); // Trennlinie vor den Pin-Infos
-    // +++ ENDE NEUES FORMULAR +++
+// --- Encoding Type (Dropdown) ---
+server->sendContent("            <div class='form-group'>\n");
+server->sendContent("              <label for='type' class='col-sm-2 control-label'>Type</label>\n");
+server->sendContent("              <div class='col-sm-10'>\n");
+server->sendContent("                <select class='form-control' id='type' name='type'>\n");
+// --- KORREKTUR: String(...) verwenden, um Verkettung zu ermöglichen ---
+server->sendContent(String("                  <option value='nec'") + addSelected("nec") + ">NEC</option>\n");
+server->sendContent(String("                  <option value='sony'") + addSelected("sony") + ">SONY</option>\n");
+server->sendContent(String("                  <option value='rc5'") + addSelected("rc5") + ">RC5</option>\n");
+server->sendContent(String("                  <option value='rc6'") + addSelected("rc6") + ">RC6</option>\n");
+server->sendContent(String("                  <option value='panasonic'") + addSelected("panasonic") + ">PANASONIC</option>\n");
+server->sendContent(String("                  <option value='lg'") + addSelected("lg") + ">LG</option>\n");
+server->sendContent(String("                  <option value='jvc'") + addSelected("jvc") + ">JVC</option>\n");
+server->sendContent(String("                  <option value='samsung'") + addSelected("samsung") + ">SAMSUNG</option>\n");
+server->sendContent(String("                  <option value='whynter'") + addSelected("whynter") + ">WHYNTER</option>\n");
+server->sendContent(String("                  <option value='coolix'") + addSelected("coolix") + ">COOLIX</option>\n");
+server->sendContent(String("                  <option value='denon'") + addSelected("denon") + ">DENON</option>\n");
+server->sendContent(String("                  <option value='sharp'") + addSelected("sharp") + ">SHARP</option>\n");
+server->sendContent(String("                  <option value='sharpraw'") + addSelected("sharpraw") + ">SHARPRAW</option>\n");
+server->sendContent(String("                  <option value='dish'") + addSelected("dish") + ">DISH</option>\n");
+server->sendContent(String("                  <option value='gree'") + addSelected("gree") + ">GREE</option>\n");
+server->sendContent(String("                  <option value='lutron'") + addSelected("lutron") + ">LUTRON</option>\n");
+server->sendContent(String("                  <option value='roomba'") + addSelected("roomba") + ">ROOMBA</option>\n");
+server->sendContent(String("                  <option value='ecoclim'") + addSelected("ecoclim") + ">ECOCLIM</option>\n");
+// Füge hier weitere Typen hinzu, falls nötig. Stelle sicher, dass der 'value' mit dem in last_send.encoding gespeicherten String übereinstimmt.
+server->sendContent("                </select>\n");
+server->sendContent("              </div>\n");
+server->sendContent("            </div>\n");
 
+// --- Data (Hex String) ---
+server->sendContent("            <div class='form-group'>\n");
+server->sendContent("              <label for='data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
+// Fügt das 'value' Attribut mit dem letzten gesendeten Wert hinzu.
+server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='data' name='data' placeholder='e.g., FF02FD' required value='" + lastData + "'></div>\n");
+server->sendContent("            </div>\n");
 
+// --- Length (Bits) ---
+server->sendContent("            <div class='form-group'>\n");
+server->sendContent("              <label for='length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
+// Fügt das 'value' Attribut mit dem letzten gesendeten Wert hinzu.
+server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='length' name='length' placeholder='e.g., 32' required value='" + lastBits + "'></div>\n");
+server->sendContent("            </div>\n");
+
+// --- Address (Hex String, optional) ---
+server->sendContent("            <div class='form-group'>\n");
+server->sendContent("              <label for='address' class='col-sm-2 control-label'>Address (Hex, optional)</label>\n");
+// Fügt das 'value' Attribut mit dem letzten gesendeten Wert hinzu.
+server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='address' name='address' placeholder='e.g., 0x404 (for Panasonic)' value='" + lastAddress + "'></div>\n");
+server->sendContent("            </div>\n");
+
+// --- Repeat ---
+server->sendContent("            <div class='form-group'>\n");
+server->sendContent("              <label for='repeat' class='col-sm-2 control-label'>Repeat</label>\n");
+// Fügt das 'value' Attribut mit dem letzten gesendeten Wert hinzu. min='1' stellt sicher, dass der Wert mindestens 1 ist.
+server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='repeat' name='repeat' value='" + lastRepeat + "' min='1'></div>\n");
+server->sendContent("            </div>\n");
+
+// --- Output Pin ---
+server->sendContent("            <div class='form-group'>\n");
+server->sendContent("              <label for='out' class='col-sm-2 control-label'>Output Pin</label>\n");
+server->sendContent("              <div class='col-sm-10'>\n");
+server->sendContent("                 <select class='form-control' id='out' name='out'>\n");
+// --- KORREKTUR: String(...) verwenden, um Verkettung zu ermöglichen ---
+// Beachte: String(pinsX) ist bereits ein String-Objekt, daher funktioniert die Verkettung hier.
+server->sendContent(String("                   <option value='1'") + addOutSelected("1") + ">1 (GPIO " + String(pins1) + ")</option>\n");
+server->sendContent(String("                   <option value='2'") + addOutSelected("2") + ">2 (GPIO " + String(pins2) + ")</option>\n");
+server->sendContent(String("                   <option value='3'") + addOutSelected("3") + ">3 (GPIO " + String(pins3) + ")</option>\n");
+server->sendContent(String("                   <option value='4'") + addOutSelected("4") + ">4 (GPIO " + String(pins4) + ")</option>\n");
+server->sendContent("                 </select>\n");
+server->sendContent("              </div>\n");
+server->sendContent("            </div>\n");
+
+// --- Submit Button ---
+server->sendContent("            <div class='form-group'>\n");
+server->sendContent("              <div class='col-sm-offset-2 col-sm-10'>\n");
+server->sendContent("                <button type='submit' class='btn btn-primary'>Send IR Code</button>\n");
+server->sendContent("              </div>\n");
+server->sendContent("            </div>\n");
+
+server->sendContent("          </form>\n");
+server->sendContent("        </div>\n");
+server->sendContent("      </div><hr />\n"); // Trennlinie vor den Pin-Infos
+// +++ ENDE KORRIGIERTES FORMULAR +++
 
 
   server->sendContent("      <div class='row'>\n");
@@ -1765,7 +1831,9 @@ String bin2hex(const uint8_t* bin, const int length) {
 //+=============================================================================
 // Send IR codes to variety of sources
 //
-void irblast(String type, String dataStr, unsigned int len, int rdelay, int pulse, int pdelay, int repeat, long address, IRsend irsend) {
+// OLD: void irblast(String type, String dataStr, unsigned int len, int rdelay, int pulse, int pdelay, int repeat, long address, IRsend irsend) {
+// NEW: Add the 'out_pin' parameter
+void irblast(String type, String dataStr, unsigned int len, int rdelay, int pulse, int pdelay, int repeat, long address, IRsend irsend, int out_pin) {
   Serial.println("Blasting off");
   type.toLowerCase();
   uint64_t data = strtoull(("0x" + dataStr).c_str(), 0, 0);
@@ -1845,10 +1913,18 @@ void irblast(String type, String dataStr, unsigned int len, int rdelay, int puls
   last_send.timestamp = now();
   last_send.valid = true;
 
+  // +++ NEUE ZEILEN +++
+  last_send.repeat = repeat;
+  last_send.out = out_pin;
+  // +++ ENDE NEUE ZEILEN +++
+
   resetReceive();
 }
 
-void pronto(JsonArray &pronto, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend) {
+// OLD: void pronto(JsonArray &pronto, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend) {
+// NEW: Add 'out_pin' parameter
+void pronto(JsonArray &pronto, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend, int out_pin) {
+  // ... (rest of the function remains the same until the end)
   Serial.println("Pronto transmit");
   holdReceive = true;
   Serial.println("Blocking incoming IR signals");
@@ -1882,10 +1958,18 @@ void pronto(JsonArray &pronto, int rdelay, int pulse, int pdelay, int repeat, IR
   last_send.timestamp = now();
   last_send.valid = true;
 
+  // +++ NEUE ZEILEN +++
+  last_send.repeat = repeat;
+  last_send.out = out_pin;
+  // +++ ENDE NEUE ZEILEN +++
+
   resetReceive();
 }
 
-void rawblast(JsonArray &raw, int khz, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend,int duty) {
+// OLD: void rawblast(JsonArray &raw, int khz, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend,int duty) {
+// NEW: Add 'out_pin' parameter
+void rawblast(JsonArray &raw, int khz, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend, int duty, int out_pin) {
+  // ... (rest of the function remains the same until the end)
   Serial.println("Raw transmit");
   holdReceive = true;
   Serial.println("Blocking incoming IR signals");
@@ -1919,6 +2003,11 @@ void rawblast(JsonArray &raw, int khz, int rdelay, int pulse, int pdelay, int re
   strncpy(last_send.address, "0x0", 20);
   last_send.timestamp = now();
   last_send.valid = true;
+
+  // +++ NEUE ZEILEN +++
+  last_send.repeat = repeat;
+  last_send.out = out_pin;
+  // +++ ENDE NEUE ZEILEN +++
 
   resetReceive();
 }
