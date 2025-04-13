@@ -4,15 +4,16 @@
 #include <IRsend.h>
 #include <IRrecv.h>
 #include <IRutils.h>
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include <WiFiManager.h>                                      // https://github.com/tzapu/WiFiManager WiFi Configuration Magic
-#include <ESP8266mDNS.h>                                      // Useful to access to ESP by hostname.local
+#include <ESPmDNS.h>                                      // Useful to access to ESP by hostname.local
 
 #include <ArduinoJson.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266HTTPClient.h>
+#include <WebServer.h>
+#include <HTTPClient.h>
 #include <ArduinoOTA.h>
-#include "sha256.h"
+#include "mbedtls/sha256.h"
+#include "mbedtls/md.h" // Für HMAC
 
 #include <Ticker.h>                                           // For LED status
 #include <TimeLib.h>
@@ -42,12 +43,12 @@ const uint16_t  pins2 = 5;                                           // Transmit
 const uint16_t  pins3 = 12;                                          // Transmitting preset 3
 const uint16_t  pins4 = 13;                                          // Transmitting preset 4
 #else
-const uint16_t  pinr1 = 14;                                          // Receiving pin
-const uint16_t  pins1 = 4;                                           // Transmitting preset 1
+const uint16_t  pinr1 = 15;                                          // Receiving pin
+const uint16_t  pins1 = 13;                                           // Transmitting preset 1
 const uint16_t  configpin = 10;                                      // Reset Pin
 const uint16_t  pins2 = 5;                                           // Transmitting preset 2
 const uint16_t  pins3 = 12;                                          // Transmitting preset 3
-const uint16_t  pins4 = 13;                                          // Transmitting preset 4
+const uint16_t  pins4 = 4;                                          // Transmitting preset 4
 #endif
 //+=============================================================================
 // User settings are above here
@@ -70,7 +71,7 @@ char static_dns[16] = "10.0.1.1";
 DynamicJsonDocument deviceState(1024);
 
 WiFiClient client;
-ESP8266WebServer *server = NULL;
+WebServer *server = NULL;
 Ticker ticker;
 
 bool shouldSaveConfig = false;                                 // Flag for saving data
@@ -224,14 +225,64 @@ bool validateHMAC(String epid, String mid, String timestamp, String signature, I
       return false;
     }
 
-    uint8_t *hash;
+    uint8_t hash_output[32]; // SHA256 produces a 32-byte hash
     String key = String(user_id);
-    Sha256.initHmac((uint8_t*)key.c_str(), key.length()); // key, and length of key in bytes
-    Sha256.print(epid);
-    Sha256.print(mid);
-    Sha256.print(timestamp);
-    hash = Sha256.resultHmac();
-    String computedSignature = bin2hex(hash, HASH_LENGTH);
+    String computedSignature = ""; // Initialize to empty
+
+    mbedtls_md_context_t ctx;
+    const mbedtls_md_info_t *md_info;
+
+    mbedtls_md_init(&ctx);
+    md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256); // Specify SHA256
+
+    if (md_info == NULL) {
+        Serial.println("ERROR: mbedtls_md_info_from_type failed");
+        mbedtls_md_free(&ctx);
+        return false; // Indicate failure
+    }
+
+    if (mbedtls_md_setup(&ctx, md_info, 1) != 0) { // 1 indicates HMAC mode
+         Serial.println("ERROR: mbedtls_md_setup failed");
+         mbedtls_md_free(&ctx);
+         return false;
+    }
+
+    if (mbedtls_md_hmac_starts(&ctx, (const unsigned char *)key.c_str(), key.length()) != 0) {
+         Serial.println("ERROR: mbedtls_md_hmac_starts failed");
+         mbedtls_md_free(&ctx);
+         return false;
+    }
+
+    // Update with the message parts in order
+    if (mbedtls_md_hmac_update(&ctx, (const unsigned char *)epid.c_str(), epid.length()) != 0) {
+         Serial.println("ERROR: mbedtls_md_hmac_update (epid) failed");
+         mbedtls_md_free(&ctx);
+         return false;
+    }
+     if (mbedtls_md_hmac_update(&ctx, (const unsigned char *)mid.c_str(), mid.length()) != 0) {
+         Serial.println("ERROR: mbedtls_md_hmac_update (mid) failed");
+         mbedtls_md_free(&ctx);
+         return false;
+    }
+     if (mbedtls_md_hmac_update(&ctx, (const unsigned char *)timestamp.c_str(), timestamp.length()) != 0) {
+         Serial.println("ERROR: mbedtls_md_hmac_update (timestamp) failed");
+         mbedtls_md_free(&ctx);
+         return false;
+    }
+
+    // Finalize the HMAC calculation and get the result
+    if (mbedtls_md_hmac_finish(&ctx, hash_output) != 0) {
+         Serial.println("ERROR: mbedtls_md_hmac_finish failed");
+         mbedtls_md_free(&ctx);
+         return false;
+    }
+
+    // Clean up the mbedtls context
+    mbedtls_md_free(&ctx);
+
+    // Convert the binary hash result to a hexadecimal string
+    computedSignature = bin2hex(hash_output, 32); // Use your existing bin2hex function
+
 
     if (computedSignature != signature) {
       Serial.println("Failed security check, signatures do not match");
@@ -293,7 +344,7 @@ String getUserID(String token)
   http.setTimeout(5000);
   String url = "https://api.amazon.com/user/profile?access_token=";
   String uid = "";
-  http.begin(client, url + token);
+  http.begin(url + token);
   int httpCode = http.GET();
   String payload = http.getString();
   Serial.println(url + token);
@@ -345,7 +396,7 @@ String externalIP()
   externalIPError = false;
   unsigned long start = millis();
   http.setTimeout(5000);
-  http.begin(client, serverName, 8245);
+  http.begin(serverName, 8245);
   int httpCode = http.GET();
 
   if (httpCode > 0 && httpCode == HTTP_CODE_OK) {
@@ -397,14 +448,22 @@ void configModeCallback (WiFiManager *myWiFiManager) {
 }
 
 
-//+=============================================================================
-// Gets called when device loses connection to the accesspoint
-//
-void lostWifiCallback (const WiFiEventStationModeDisconnected& evt) {
-  Serial.println("Lost Wifi");
-  // reset and try again, or maybe put it to deep sleep
-  ESP.reset();
-  delay(1000);
+// Callback function for WiFi events
+void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info){
+  Serial.printf("[WiFi-event] event: %d\n", event);
+
+  switch (event) {
+    case SYSTEM_EVENT_STA_DISCONNECTED: // Older Cores might use this enum name directly
+    // case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: // Newer Cores use this
+        Serial.println("Lost Wifi - WiFi station disconnected");
+        Serial.printf("Reason: %d\n", info.wifi_sta_disconnected.reason);
+        // reset and try again
+        ESP.restart();
+        // delay(1000); // Delay likely won't execute after reset
+        break;
+    default:
+        break;
+  }
 }
 
 
@@ -502,7 +561,7 @@ bool setupWifi(bool resetConf) {
   if (!wifiManager.autoConnect(wifi_config_name)) {
     Serial.println("Failed to connect and hit timeout");
     // reset and try again, or maybe put it to deep sleep
-    ESP.reset();
+    ESP.restart();
     delay(1000);
   }
 
@@ -516,10 +575,14 @@ bool setupWifi(bool resetConf) {
   if (server != NULL) {
     delete server;
   }
-  server = new ESP8266WebServer(port);
+  server = new WebServer(port);
 
-  // Reset device if lost wifi Connection
-  WiFi.onStationModeDisconnected(&lostWifiCallback);
+// Register the WiFi event handler function for the disconnect event
+WiFi.onEvent(WiFiEvent);
+// Or if using newer core versions and the ARDUINO_EVENT_... enum:
+// WiFi.onEvent(WiFiEvent, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+// If you kept the old function name:
+// WiFi.onEvent(lostWifiCallback, SYSTEM_EVENT_STA_DISCONNECTED);
 
   Serial.println("WiFi connected! User chose hostname '" + String(host_name) + String("' passcode '") + String(passcode) + "' and port '" + String(port_str) + "'");
 
@@ -577,7 +640,7 @@ void setup() {
   pinMode(ledpin, OUTPUT);
 
   Serial.println("");
-  Serial.println("ESP8266 IR Controller");
+  Serial.println("ESP32 IR Controller");
   pinMode(configpin, INPUT_PULLUP);
   Serial.print("Config pin GPIO");
   Serial.print(configpin);
@@ -588,10 +651,25 @@ void setup() {
 
   Serial.println("WiFi configuration complete");
 
+  // Set the hostname
   if (strlen(host_name) > 0) {
-    WiFi.hostname(host_name);
+    // A hostname was loaded from config or set via WiFiManager
+    if (!WiFi.setHostname(host_name)) {
+      Serial.println("ERROR: Failed to set hostname!");
+    } else {
+      Serial.print("Hostname set to: ");
+      Serial.println(host_name);
+    }
   } else {
-    WiFi.hostname().toCharArray(host_name, 20);
+    // No hostname was provided, get the default hostname generated by ESP32
+    // (usually based on MAC address like "ESP32-AABBCCDDEEFF")
+    const char* defaultHostname = WiFi.getHostname();
+    strncpy(host_name, defaultHostname, sizeof(host_name) - 1); // Copy default hostname to our buffer
+    host_name[sizeof(host_name) - 1] = '\0'; // Ensure null termination
+    Serial.print("Using default hostname: ");
+    Serial.println(host_name);
+    // Optional: Man könnte hier auch nochmals WiFi.setHostname(host_name) aufrufen,
+    // aber getHostname sollte bereits den aktiven Namen liefern.
   }
 
   while (WiFi.status() != WL_CONNECTED) {
@@ -599,7 +677,7 @@ void setup() {
     Serial.print(".");
   }
 
-  wifi_set_sleep_type(LIGHT_SLEEP_T);
+  WiFi.setSleep(true);
   digitalWrite(ledpin, LOW);
   // Turn off the led in 2s
   ticker.attach(2, disableLed);
@@ -936,7 +1014,7 @@ void setup() {
   Serial.println("Starting UDP");
   ntpUDP.begin(localPort);
   Serial.print("Local port: ");
-  Serial.println(ntpUDP.localPort());
+  Serial.println(localPort);
   Serial.println("Waiting for sync");
   setSyncProvider(getNtpTime);
   setSyncInterval(300);
@@ -1041,7 +1119,7 @@ int rokuCommand(String ip, String data, int repeat, int rdelay) {
   int output = 0;
 
   for (int r = 0; r < repeat; r++) {
-    http.begin(client, url);
+    http.begin(url);
     Serial.println(url);
     Serial.println("Sending roku command");
   
@@ -1141,7 +1219,7 @@ void sendHeader(int httpcode) {
   server->sendContent("    <meta name='viewport' content='width=device-width, initial-scale=.75' />\n");
   server->sendContent("    <link rel='stylesheet' href='https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css' />\n");
   server->sendContent("    <style>@media (max-width: 991px) {.nav-pills>li {float: none; margin-left: 0; margin-top: 5px; text-align: center;}}</style>\n");
-  server->sendContent("    <title>ESP8266 IR Controller (" + String(host_name) + ")</title>\n");
+  server->sendContent("    <title>ESP32 IR Controller (" + String(host_name) + ")</title>\n");
   server->sendContent("  </head>\n");
   server->sendContent("  <body>\n");
   server->sendContent("    <div class='container'>\n");
