@@ -1,0 +1,47 @@
+<!-- data/header.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Statischer Titel - kann später per JS angepasst werden -->
+    <title>ESP IR Remote</title>
+    <!-- Bootstrap CSS (lokal oder CDN) -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <!-- Optional: Link zu deiner eigenen CSS-Datei -->
+    <!-- <link rel="stylesheet" href="/style.css"> -->
+    <style>
+      /* Grundlegende Stile, falls kein separates CSS verwendet wird */
+      body { padding-top: 70px; } /* Platz für feste Navbar */
+      .table th { text-align: left; }
+      .wrap { word-wrap: break-word; }
+      .mono { font-family: monospace; }
+      .remote-button { min-width: 120px; margin: 5px; } /* Beispiel für Button-Styling */
+      .status-box { margin-bottom: 20px; }
+      .code-table td, .code-table th { padding: 4px 8px; }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-inverse navbar-fixed-top">
+  <div class="container">
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+        <span class="sr-only">Toggle navigation</span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" href="/">ESP IR Remote</a>
+    </div>
+    <div id="navbar" class="collapse navbar-collapse">
+      <ul class="nav navbar-nav">
+        <li class="active"><a href="/">Home</a></li>
+        <li><a href="/buttons">Configure Buttons</a></li>
+        <!-- Füge hier bei Bedarf weitere Menüpunkte hinzu -->
+      </ul>
+    </div><!--/.nav-collapse -->
+  </div>
+</nav>
+
+<div class="container">
+<!-- Seiteninhalt kommt hier dazwischen -->

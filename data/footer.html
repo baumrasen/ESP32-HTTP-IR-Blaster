@@ -1,0 +1,51 @@
+<!-- data/footer.html -->
+
+</div> <!-- /container -->
+
+<hr>
+<footer>
+  <p style="text-align: center;">
+    ESP IR Blaster | <span id="footer-chip-info">ChipID: Loading...</span> | Uptime: <span id="footer-uptime">Loading...</span> | <a href="YOUR_REPO_LINK_HERE" target="_blank">GitHub</a>
+  </p>
+</footer>
+
+<!-- jQuery und Bootstrap JS (lokal oder CDN) -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+<!-- Optional: Link zu deiner eigenen JS-Datei -->
+<!-- <script src="/script.js"></script> -->
+
+<!-- Kleines Skript, um dynamische Footer-Infos zu laden (Beispiel) -->
+<script>
+  // Diese Funktion könnte später in eine ausgelagerte script.js verschoben werden
+  function updateFooterInfo() {
+    // Beispiel: Annahme, es gibt einen API-Endpunkt /api/status
+    fetch('/api/status') // Du musst diesen Endpunkt noch erstellen!
+      .then(response => response.ok ? response.json() : Promise.reject('Failed to load'))
+      .then(data => {
+        if (data.chipId) {
+          document.getElementById('footer-chip-info').textContent = `ChipID: ${data.chipId}`;
+        }
+        if (data.uptime) {
+          const uptimeSec = Math.floor(data.uptime / 1000);
+          const days = Math.floor(uptimeSec / 86400);
+          const hours = Math.floor((uptimeSec % 86400) / 3600);
+          const minutes = Math.floor((uptimeSec % 3600) / 60);
+          document.getElementById('footer-uptime').textContent = `${days}d ${hours}h ${minutes}m`;
+        }
+      })
+      .catch(error => {
+        console.error("Error updating footer:", error);
+        // Fallback-Text anzeigen
+        document.getElementById('footer-chip-info').textContent = 'ChipID: N/A';
+        document.getElementById('footer-uptime').textContent = 'Uptime: N/A';
+      });
+  }
+  // Beim Laden der Seite aufrufen
+  // updateFooterInfo(); // Aktivieren, wenn /api/status existiert
+  // Optional: Regelmäßig aktualisieren
+  // setInterval(updateFooterInfo, 30000); // Alle 30 Sek.
+</script>
+
+</body>
+</html>

@@ -148,6 +148,10 @@ struct ButtonConfig {
   char address[20] = "";   // Adresse (Hex String, optional)
   int repeat = 1;          // Wiederholungen
   int out = 1;             // Output Pin (1-4)
+  // --- NEUE Felder für MAKRO ---
+  bool isMacro = false;    // Ist dieser Button ein Makro?
+  char macroJson[512] = ""; // JSON-String für das Makro (Größe ggf. anpassen)
+  // --- Status ---
   bool configured = false; // Ist dieser Button-Slot konfiguriert?
 };
 
@@ -202,9 +206,19 @@ void loadButtonConfig() {
           buttonConfigs[count].data[sizeof(buttonConfigs[count].data) - 1] = '\0';
           buttonConfigs[count].address[sizeof(buttonConfigs[count].address) - 1] = '\0';
 
-          // Einfache Validierung: Wenn Name oder Daten fehlen, ist er nicht konfiguriert
-          if (strlen(buttonConfigs[count].name) == 0 || strlen(buttonConfigs[count].data) == 0 || buttonConfigs[count].length == 0) {
-             buttonConfigs[count].configured = false;
+          // NEU: Lade Makro-Informationen
+          buttonConfigs[count].isMacro = buttonJson["isMacro"] | false; // Default ist false
+          strncpy(buttonConfigs[count].macroJson, buttonJson["macroJson"] | "", sizeof(buttonConfigs[count].macroJson) - 1);
+          buttonConfigs[count].macroJson[sizeof(buttonConfigs[count].macroJson) - 1] = '\0'; // Sicherstellen, dass null-terminiert
+
+          buttonConfigs[count].configured = buttonJson["configured"] | false;
+
+          // Erweiterte Validierung:
+          if (strlen(buttonConfigs[count].name) == 0 ||
+          (!buttonConfigs[count].isMacro && (strlen(buttonConfigs[count].data) == 0 || buttonConfigs[count].length == 0)) ||
+          (buttonConfigs[count].isMacro && strlen(buttonConfigs[count].macroJson) == 0) )
+          {
+          buttonConfigs[count].configured = false;
           }
 
           count++;
@@ -243,17 +257,40 @@ void saveButtonConfig() {
     JsonObject buttonJson = buttonArray.createNestedObject();
     // Nur speichern, wenn konfiguriert (oder zumindest Name gesetzt ist)
     if (buttonConfigs[i].configured && strlen(buttonConfigs[i].name) > 0) {
-        buttonJson["name"] = buttonConfigs[i].name;
-        buttonJson["type"] = buttonConfigs[i].type;
-        buttonJson["data"] = buttonConfigs[i].data;
-        buttonJson["length"] = buttonConfigs[i].length;
-        buttonJson["address"] = buttonConfigs[i].address;
-        buttonJson["repeat"] = buttonConfigs[i].repeat;
-        buttonJson["out"] = buttonConfigs[i].out;
-        buttonJson["configured"] = true;
+      buttonJson["name"] = buttonConfigs[i].name;
+      buttonJson["configured"] = true;
+      buttonJson["isMacro"] = buttonConfigs[i].isMacro; // NEU
+
+      if (buttonConfigs[i].isMacro) {
+          // Speichere Makro-JSON
+          buttonJson["macroJson"] = buttonConfigs[i].macroJson;
+          // Optional: Setze die anderen Felder auf Defaults oder lasse sie weg
+          buttonJson["type"] = "";
+          buttonJson["data"] = "";
+          buttonJson["length"] = 0;
+          buttonJson["address"] = "";
+          buttonJson["repeat"] = 1;
+          buttonJson["out"] = 1;
+      } else {
+          // Speichere Einzel-Signal-Daten (wie bisher)
+          buttonJson["type"] = buttonConfigs[i].type;
+          buttonJson["data"] = buttonConfigs[i].data;
+          buttonJson["length"] = buttonConfigs[i].length;
+          buttonJson["address"] = buttonConfigs[i].address;
+          buttonJson["repeat"] = buttonConfigs[i].repeat;
+          buttonJson["out"] = buttonConfigs[i].out;
+          // Optional: Setze macroJson auf leer oder lasse es weg
+          buttonJson["macroJson"] = "";
+      }
     } else {
         // Leeren Eintrag speichern, um die Position zu markieren
         buttonJson["configured"] = false;
+        // Optional: Alle Felder auf Default/leer setzen
+        buttonJson["name"] = "";
+        buttonJson["isMacro"] = false;
+        buttonJson["macroJson"] = "";
+        buttonJson["type"] = "";
+        buttonJson["data"] = "";
     }
   }
 
@@ -822,50 +859,69 @@ void handleButtonConfigPage() {
 
   for (int i = 0; i < MAX_BUTTONS; ++i) {
     String prefix = "btn" + String(i) + "_"; // Prefix für Feldnamen
+    bool currentIsMacro = buttonConfigs[i].configured && buttonConfigs[i].isMacro;
 
     server->sendContent("            <hr><h4>Button " + String(i + 1) + "</h4>\n");
 
-    // Name
+    // Name (bleibt)
     server->sendContent("            <div class='form-group'>\n");
     server->sendContent("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n");
     server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label (e.g., TV Power)' value='" + String(buttonConfigs[i].name) + "'></div>\n");
     server->sendContent("            </div>\n");
 
-    // Type (Dropdown)
+    // NEU: Modus-Auswahl (Radio Buttons)
     server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
-    server->sendContent("              <div class='col-sm-10'>" + generateTypeDropdown(prefix + "type", String(buttonConfigs[i].type)) + "</div>\n");
+    server->sendContent("              <label class='col-sm-2 control-label'>Mode</label>\n");
+    server->sendContent("              <div class='col-sm-10'>\n");
+    server->sendContent("                <label class='radio-inline'><input type='radio' name='" + prefix + "mode' value='single' " + (!currentIsMacro ? "checked" : "") + " onclick='toggleFields(\"" + prefix + "\", false)'> Single Code</label>\n");
+    server->sendContent("                <label class='radio-inline'><input type='radio' name='" + prefix + "mode' value='macro' " + (currentIsMacro ? "checked" : "") + " onclick='toggleFields(\"" + prefix + "\", true)'> Macro (JSON)</label>\n");
+    server->sendContent("              </div>\n");
     server->sendContent("            </div>\n");
 
-    // Data (Hex)
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='" + prefix + "data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
-    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "data' name='" + prefix + "data' placeholder='e.g., FF02FD' value='" + String(buttonConfigs[i].data) + "'></div>\n");
-    server->sendContent("            </div>\n");
+    // Container für Single-Code-Felder
+    server->sendContent("            <div id='" + prefix + "single_code_fields' style='" + (currentIsMacro ? "display: none;" : "") + "'>\n");
+        // Type (Dropdown)
+        server->sendContent("            <div class='form-group'>\n");
+        server->sendContent("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
+        server->sendContent("              <div class='col-sm-10'>" + generateTypeDropdown(prefix + "type", String(buttonConfigs[i].type)) + "</div>\n");
+        server->sendContent("            </div>\n");
+        // Data (Hex)
+        server->sendContent("            <div class='form-group'>\n");
+        server->sendContent("              <label for='" + prefix + "data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
+        server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "data' name='" + prefix + "data' placeholder='e.g., FF02FD' value='" + String(buttonConfigs[i].data) + "'></div>\n");
+        server->sendContent("            </div>\n");
+        // Length (Bits)
+        server->sendContent("            <div class='form-group'>\n");
+        server->sendContent("              <label for='" + prefix + "length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
+        server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "length' name='" + prefix + "length' placeholder='e.g., 32' value='" + String(buttonConfigs[i].length) + "'></div>\n");
+        server->sendContent("            </div>\n");
+        // Address (Hex, optional)
+        server->sendContent("            <div class='form-group'>\n");
+        server->sendContent("              <label for='" + prefix + "address' class='col-sm-2 control-label'>Address (Hex, opt.)</label>\n");
+        server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "address' name='" + prefix + "address' placeholder='e.g., 0x404' value='" + String(buttonConfigs[i].address) + "'></div>\n");
+        server->sendContent("            </div>\n");
+        // Repeat
+        server->sendContent("            <div class='form-group'>\n");
+        server->sendContent("              <label for='" + prefix + "repeat' class='col-sm-2 control-label'>Repeat</label>\n");
+        server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "repeat' name='" + prefix + "repeat' value='" + String(buttonConfigs[i].repeat) + "' min='1'></div>\n");
+        server->sendContent("            </div>\n");
+        // Output Pin (Dropdown)
+        server->sendContent("            <div class='form-group'>\n");
+        server->sendContent("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
+        server->sendContent("              <div class='col-sm-10'>" + generateOutDropdown(prefix + "out", buttonConfigs[i].out) + "</div>\n");
+        server->sendContent("            </div>\n");
+    server->sendContent("            </div>\n"); // Ende single_code_fields
 
-    // Length (Bits)
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='" + prefix + "length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
-    server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "length' name='" + prefix + "length' placeholder='e.g., 32' value='" + String(buttonConfigs[i].length) + "'></div>\n");
-    server->sendContent("            </div>\n");
-
-    // Address (Hex, optional)
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='" + prefix + "address' class='col-sm-2 control-label'>Address (Hex, opt.)</label>\n");
-    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "address' name='" + prefix + "address' placeholder='e.g., 0x404' value='" + String(buttonConfigs[i].address) + "'></div>\n");
-    server->sendContent("            </div>\n");
-
-    // Repeat
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='" + prefix + "repeat' class='col-sm-2 control-label'>Repeat</label>\n");
-    server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "repeat' name='" + prefix + "repeat' value='" + String(buttonConfigs[i].repeat) + "' min='1'></div>\n");
-    server->sendContent("            </div>\n");
-
-    // Output Pin (Dropdown)
-    server->sendContent("            <div class='form-group'>\n");
-    server->sendContent("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
-    server->sendContent("              <div class='col-sm-10'>" + generateOutDropdown(prefix + "out", buttonConfigs[i].out) + "</div>\n");
-    server->sendContent("            </div>\n");
+    // Container für Makro-Feld
+    server->sendContent("            <div id='" + prefix + "macro_field' style='" + (!currentIsMacro ? "display: none;" : "") + "'>\n");
+        server->sendContent("            <div class='form-group'>\n");
+        server->sendContent("              <label for='" + prefix + "macroJson' class='col-sm-2 control-label'>Macro JSON</label>\n");
+        server->sendContent("              <div class='col-sm-10'>\n");
+        server->sendContent("                <textarea class='form-control' id='" + prefix + "macroJson' name='" + prefix + "macroJson' rows='6' placeholder='Enter JSON array, e.g.,\\n[{&quot;type&quot;:&quot;nec&quot;, &quot;data&quot;:&quot;FF02FD&quot;, &quot;length&quot;:32}, {&quot;type&quot;:&quot;delay&quot;, &quot;rdelay&quot;:500}, {...}]'>" + String(buttonConfigs[i].macroJson) + "</textarea>\n");
+        server->sendContent("                <span class='help-block'>Define a sequence of actions like in the /json endpoint. Use an array `[]` containing objects `{}`.</span>\n");
+        server->sendContent("              </div>\n");
+        server->sendContent("            </div>\n");
+    server->sendContent("            </div>\n"); // Ende macro_field
   }
 
   // Submit Button
@@ -879,6 +935,14 @@ void handleButtonConfigPage() {
   server->sendContent("          </form>\n");
   server->sendContent("        </div>\n");
   server->sendContent("      </div>\n");
+
+  // NEU: JavaScript zum Umschalten der Felder hinzufügen (vor dem </form> oder am Ende der Seite)
+server->sendContent("          <script>\n");
+server->sendContent("            function toggleFields(prefix, isMacro) {\n");
+server->sendContent("              document.getElementById(prefix + 'single_code_fields').style.display = isMacro ? 'none' : 'block';\n");
+server->sendContent("              document.getElementById(prefix + 'macro_field').style.display = isMacro ? 'block' : 'none';\n");
+server->sendContent("            }\n");
+server->sendContent("          </script>\n");
 
   sendFooter(); // Send standard HTML footer
 }
@@ -894,50 +958,83 @@ void handleSaveButtons() {
   // if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) { ... }
 
   bool changed = false;
-  for (int i = 0; i < MAX_BUTTONS; ++i) {
+for (int i = 0; i < MAX_BUTTONS; ++i) {
     String prefix = "btn" + String(i) + "_";
 
     String name = server->arg(prefix + "name");
+    name.trim();
+
+    // NEU: Modus auslesen
+    String mode = server->arg(prefix + "mode"); // "single" oder "macro"
+    bool isMacro = (mode == "macro");
+
+    // Daten für den jeweiligen Modus auslesen
     String type = server->arg(prefix + "type");
     String data = server->arg(prefix + "data");
     int length = server->arg(prefix + "length").toInt();
     String address = server->arg(prefix + "address");
     int repeat = server->arg(prefix + "repeat").toInt();
     int out = server->arg(prefix + "out").toInt();
+    String macroJson = server->arg(prefix + "macroJson");
 
-    // Trim whitespace from name
-    name.trim();
-
-    // Grundlegende Validierung: Button ist konfiguriert, wenn Name, Daten und Länge vorhanden sind
-    bool isConfigured = (name.length() > 0 && data.length() > 0 && length > 0);
+    // Grundlegende Validierung basierend auf dem Modus
+    bool isConfigured = (name.length() > 0 &&
+                         ((!isMacro && data.length() > 0 && length > 0) ||
+                          (isMacro && macroJson.length() > 0)));
 
     // Nur aktualisieren, wenn sich etwas geändert hat oder der Status sich ändert
-    if (isConfigured != buttonConfigs[i].configured ||
-        (isConfigured && (
-          name != buttonConfigs[i].name || type != buttonConfigs[i].type || data != buttonConfigs[i].data ||
-          length != buttonConfigs[i].length || address != buttonConfigs[i].address ||
-          repeat != buttonConfigs[i].repeat || out != buttonConfigs[i].out)))
+    // (Diese Logik muss erweitert werden, um Änderungen in *allen* relevanten Feldern zu erkennen)
+    bool configChanged = false;
+    if (isConfigured != buttonConfigs[i].configured || name != buttonConfigs[i].name || isMacro != buttonConfigs[i].isMacro) {
+        configChanged = true;
+    } else if (isConfigured) {
+        if (isMacro) {
+            if (macroJson != buttonConfigs[i].macroJson) configChanged = true;
+        } else {
+            if (type != buttonConfigs[i].type || data != buttonConfigs[i].data ||
+                length != buttonConfigs[i].length || address != buttonConfigs[i].address ||
+                repeat != buttonConfigs[i].repeat || out != buttonConfigs[i].out) {
+                configChanged = true;
+            }
+        }
+    }
+
+    if (configChanged)
     {
-        changed = true;
+        changed = true; // Markiere, dass *irgendetwas* geändert wurde
         strncpy(buttonConfigs[i].name, name.c_str(), sizeof(buttonConfigs[i].name) - 1);
         buttonConfigs[i].name[sizeof(buttonConfigs[i].name) - 1] = '\0'; // Null-terminieren
+        buttonConfigs[i].isMacro = isMacro; // NEU: Modus speichern
+        buttonConfigs[i].configured = isConfigured; // NEU: Konfiguriert-Status setzen
 
         if (isConfigured) {
-            strncpy(buttonConfigs[i].type, type.c_str(), sizeof(buttonConfigs[i].type) - 1);
-            strncpy(buttonConfigs[i].data, data.c_str(), sizeof(buttonConfigs[i].data) - 1);
-            buttonConfigs[i].length = length;
-            strncpy(buttonConfigs[i].address, address.c_str(), sizeof(buttonConfigs[i].address) - 1);
-            buttonConfigs[i].repeat = (repeat > 0) ? repeat : 1;
-            buttonConfigs[i].out = (out >= 1 && out <= 4) ? out : 1;
-            buttonConfigs[i].configured = true;
+            if (isMacro) {
+                // Makro-Daten speichern, Single-Code-Daten löschen/Defaults setzen
+                strncpy(buttonConfigs[i].macroJson, macroJson.c_str(), sizeof(buttonConfigs[i].macroJson) - 1);
+                buttonConfigs[i].macroJson[sizeof(buttonConfigs[i].macroJson) - 1] = '\0';
+                buttonConfigs[i].type[0] = '\0';
+                buttonConfigs[i].data[0] = '\0';
+                buttonConfigs[i].length = 0;
+                buttonConfigs[i].address[0] = '\0';
+                buttonConfigs[i].repeat = 1;
+                buttonConfigs[i].out = 1;
+            } else {
+                // Single-Code-Daten speichern, Makro-Daten löschen
+                strncpy(buttonConfigs[i].type, type.c_str(), sizeof(buttonConfigs[i].type) - 1);
+                strncpy(buttonConfigs[i].data, data.c_str(), sizeof(buttonConfigs[i].data) - 1);
+                buttonConfigs[i].length = length;
+                strncpy(buttonConfigs[i].address, address.c_str(), sizeof(buttonConfigs[i].address) - 1);
+                buttonConfigs[i].repeat = (repeat > 0) ? repeat : 1;
+                buttonConfigs[i].out = (out >= 1 && out <= 4) ? out : 1;
+                buttonConfigs[i].macroJson[0] = '\0';
 
-            // Sicherstellen, dass Strings null-terminiert sind
-            buttonConfigs[i].type[sizeof(buttonConfigs[i].type) - 1] = '\0';
-            buttonConfigs[i].data[sizeof(buttonConfigs[i].data) - 1] = '\0';
-            buttonConfigs[i].address[sizeof(buttonConfigs[i].address) - 1] = '\0';
-
+                // Sicherstellen, dass Strings null-terminiert sind
+                buttonConfigs[i].type[sizeof(buttonConfigs[i].type) - 1] = '\0';
+                buttonConfigs[i].data[sizeof(buttonConfigs[i].data) - 1] = '\0';
+                buttonConfigs[i].address[sizeof(buttonConfigs[i].address) - 1] = '\0';
+            }
         } else {
-            // Button deaktivieren/leeren
+            // Button deaktivieren/leeren (wie bisher, aber auch Makro leeren)
             buttonConfigs[i].name[0] = '\0';
             buttonConfigs[i].type[0] = '\0';
             buttonConfigs[i].data[0] = '\0';
@@ -945,21 +1042,23 @@ void handleSaveButtons() {
             buttonConfigs[i].address[0] = '\0';
             buttonConfigs[i].repeat = 1;
             buttonConfigs[i].out = 1;
+            buttonConfigs[i].isMacro = false;
+            buttonConfigs[i].macroJson[0] = '\0';
             buttonConfigs[i].configured = false;
         }
     }
-  }
+}
 
-  if (changed) {
+if (changed) {
     Serial.println("Button configuration changed, saving...");
     saveButtonConfig();
-  } else {
+} else {
     Serial.println("No changes detected in button configuration.");
-  }
+}
 
-  // Redirect back to home page after saving
-  server->sendHeader("Location", "/?status=buttons_saved"); // Optional: Status für Feedback
-  server->send(303); // 303 See Other
+// Redirect back to home page after saving
+server->sendHeader("Location", "/?status=buttons_saved"); // Optional: Status für Feedback
+server->send(303); // 303 See Other
 }
 
 
@@ -1119,6 +1218,18 @@ irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(o
 void setup() {
   // Initialize serial
   Serial.begin(115200);
+  Serial.println("\nBooting...");
+
+  if (!LittleFS.begin()) {
+    Serial.println("LittleFS Mount Failed! Formatting...");
+    if (LittleFS.format()) {
+       Serial.println("LittleFS Formatted. Please reset.");
+    } else {
+       Serial.println("LittleFS Format Failed.");
+    }
+    while(1) yield(); // Anhalten nach Formatierung
+  }
+  Serial.println("LittleFS Mounted.");
 
   // set led pin as output
   pinMode(ledpin, OUTPUT);
@@ -1730,65 +1841,89 @@ void sendHeader() {
   sendHeader(200);
 }
 
-void sendHeader(int httpcode) {
-  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server->send(httpcode, "text/html; charset=utf-8", "");
-  server->sendContent("<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'>\n");
-  server->sendContent("<html xmlns='http://www.w3.org/1999/xhtml' xml:lang='en'>\n");
-  server->sendContent("  <head>\n");
-  server->sendContent("    <meta name='viewport' content='width=device-width, initial-scale=.75' />\n");
-  server->sendContent("    <link rel='stylesheet' href='https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css' />\n");
-  server->sendContent("    <style>@media (max-width: 991px) {.nav-pills>li {float: none; margin-left: 0; margin-top: 5px; text-align: center;}}</style>\n");
-  server->sendContent("    <title>ESP32 IR Controller (" + String(host_name) + ")</title>\n");
-  server->sendContent("  </head>\n");
-  server->sendContent("  <body>\n");
-  server->sendContent("    <div class='container'>\n");
-  server->sendContent("      <h1><a href='https://github.com/baumrasen/ESP8266-HTTP-IR-Blaster'>Extended ESP32 IR Controller</a></h1>\n");
-  server->sendContent("      <div class='row'>\n");
-  server->sendContent("        <div class='col-md-12'>\n");
-  server->sendContent("          <ul class='nav nav-pills'>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a href='http://" + String(host_name) + ".local" + ":" + String(port) + "'>Hostname <span class='badge'>" + String(host_name) + ".local" + ":" + String(port) + "</span></a></li>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a href='http://" + WiFi.localIP().toString() + ":" + String(port) + "'>Local <span class='badge'>" + WiFi.localIP().toString() + ":" + String(port) + "</span></a></li>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a href='http://" + WiFi.dnsIP().toString() + "'>DNS <span class='badge'>" + WiFi.dnsIP().toString() + "</span></a></li>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a href='http://" + externalIP() + ":" + String(port) + "'>External <span class='badge'>" + externalIP() + ":" + String(port) + "</span></a></li>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a>MAC <span class='badge'>" + String(WiFi.macAddress()) + "</span></a></li>\n");
-  server->sendContent("          </ul>\n");
-  server->sendContent("        </div>\n");
-  server->sendContent("      </div><hr />\n");
+void sendHeader(int httpcode) { 
+  // Setze den Content-Type für die gesamte Seite
+  server->sendHeader("Content-Type", "text/html; charset=utf-8");
+  server->sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  server->sendHeader("Pragma", "no-cache");
+  server->sendHeader("Expires", "-1");
+  // Beginne die Antwort (wichtig, damit sendContent funktioniert)
+  // Sende den Header-Inhalt aus der Datei
+  File headerFile = LittleFS.open("/header.html", "r");
+  if (headerFile) {
+    // Sende den Inhalt stückweise, falls er groß ist
+    // server->sendContent_P(headerFile.readString().c_str()); // Einfach, aber speicherintensiv für große Dateien
+    // Besser: Stückweise senden
+    server->sendContent(""); // Beginnt die chunked response
+    while(headerFile.available()){
+        char buf[256]; // Puffergröße anpassen
+        size_t len = headerFile.readBytes(buf, sizeof(buf));
+        server->sendContent(buf, len);
+    }
+    headerFile.close();
+  } else {
+    Serial.println("ERROR: header.html not found!");
+    server->sendContent("<!DOCTYPE html><html><head><title>Error</title></head><body><h1>Error: Header file not found!</h1>");
+    // Sende hier nicht den Footer, da der Header fehlt.
+  }
+  // Die Verbindung bleibt offen für den eigentlichen Seiteninhalt
 }
+
 
 //+=============================================================================
 // Send footer HTML
 //
 void sendFooter() {
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime; EPOCH " + String(now() - (timeZone * SECS_PER_HOUR)) + "</em> / <em id='jepoch'></em> ( <em id='jdiff'></em> )</div></div>\n");
-  server->sendContent("      <script>document.getElementById('jepoch').innerHTML = Math.round((new Date()).getTime() / 1000)</script>");
-  server->sendContent("      <script>document.getElementById('jdiff').innerHTML = Math.abs(Math.round((new Date()).getTime() / 1000) - " + String(now() - (timeZone * SECS_PER_HOUR)) + ")</script>");
-  if (strlen(user_id) != 0)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Device secured with SHA256 authentication. Only commands sent and verified with Amazon Alexa and the IR Controller Skill will be processed</em></div></div>");
-  if (authError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last authentication failed because HMAC signatures did not match, see serial output for debugging details</em></div></div>");
-  if (timeAuthError > 0)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last authentication failed because your timestamps are out of sync, see serial output for debugging details. Timediff: " + String(timeAuthError) + "</em></div></div>");
-  if (externalIPError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - unable to retrieve external IP address, this may be due to bad network settings.</em></div></div>");
-  time_t timenow = now() - (timeZone * SECS_PER_HOUR);
-  if (!validEPOCH(timenow))
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - EPOCH time is inappropriately low, likely connection to external time server has failed, check your network settings</em></div></div>");
-  if (userIDError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - your userID is in the wrong format and authentication will not work</em></div></div>");
-  if (ntpError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last attempt to connect to the NTP server failed, check NTP settings and networking settings</em></div></div>");
-  server->sendContent("    </div>\n");
-  server->sendContent("  </body>\n");
-  server->sendContent("</html>\n");
-  server->client().stop();
+  // Sende den Footer-Inhalt aus der Datei
+  File footerFile = LittleFS.open("/footer.html", "r");
+  if (footerFile) {
+    // Sende den Inhalt stückweise
+     while(footerFile.available()){
+        char buf[256]; // Puffergröße anpassen
+        size_t len = footerFile.readBytes(buf, sizeof(buf));
+        server->sendContent(buf, len);
+    }
+    footerFile.close();
+  } else {
+    Serial.println("ERROR: footer.html not found!");
+    server->sendContent("<p><em>Error: Footer file not found!</em></p></body></html>");
+  }
+  // Beende die Antwort (wird durch den letzten sendContent implizit gemacht)
+  server->sendContent(""); // Sendet den finalen chunk und schließt die Antwort
 }
+
+
+// Helper function to send a file from LittleFS
+bool sendFileFromFS(const String& path, const String& contentType) {
+  // WICHTIG: Pfad muss mit '/' beginnen!
+  String pathWithSlash = path;
+  if (!pathWithSlash.startsWith("/")) {
+    pathWithSlash = "/" + pathWithSlash;
+  }
+
+  Serial.print("Attempting to send: "); Serial.println(pathWithSlash);
+  File file = LittleFS.open(pathWithSlash, "r");
+  if (!file) {
+    Serial.print("Failed to open file: "); Serial.println(pathWithSlash);
+    // Sende keine 404 hier, da es Teil einer größeren Antwort sein könnte
+    return false;
+  }
+
+  // Sende den Inhalt der Datei direkt. streamFile ist effizienter,
+  // aber für Header/Footer, die oft mit anderem Content gesendet werden,
+  // ist server->write() einfacher zu integrieren.
+  size_t sent = server->streamFile(file, contentType);
+  file.close();
+
+  if (sent != file.size()) {
+     Serial.println("Sent less data than expected!");
+     return false;
+  }
+
+  Serial.print("Sent file: "); Serial.println(pathWithSlash);
+  return true;
+}
+
 
 //+=============================================================================
 // Stream home page HTML
@@ -1820,17 +1955,30 @@ void sendHomePage(String message, String header, int type, int httpcode) {
     if (buttonConfigs[i].configured) {
       anyButtonConfigured = true;
       server->sendContent("            <button class='btn btn-primary btn-lg remote-button' style='margin: 5px;' ");
-      // Speichere IR-Daten in data-Attributen
-      server->sendContent("data-type='" + String(buttonConfigs[i].type) + "' ");
-      server->sendContent("data-data='" + String(buttonConfigs[i].data) + "' ");
-      server->sendContent("data-length='" + String(buttonConfigs[i].length) + "' ");
-      server->sendContent("data-address='" + String(buttonConfigs[i].address) + "' ");
-      server->sendContent("data-repeat='" + String(buttonConfigs[i].repeat) + "' ");
-      server->sendContent("data-out='" + String(buttonConfigs[i].out) + "'>");
+      // Speichere IR-Daten ODER Makro-Daten in data-Attributen
+      if (buttonConfigs[i].isMacro) {
+          server->sendContent("data-is-macro='true' ");
+          // WICHTIG: JSON im Attribut korrekt escapen (Anführungszeichen!)
+          // Eine einfache Ersetzung ist hier riskant. Besser wäre es,
+          // das JSON im JavaScript direkt aus einer Datenstruktur zu holen,
+          // aber für die direkte Einbettung versuchen wir es so:
+          String escapedJson = String(buttonConfigs[i].macroJson);
+          escapedJson.replace("'", "&#39;"); // Escape einfache Anführungszeichen
+          escapedJson.replace("\"", "&quot;"); // Escape doppelte Anführungszeichen
+          server->sendContent("data-macro-json='" + escapedJson + "'>");
+      } else {
+          server->sendContent("data-is-macro='false' "); // Explizit setzen
+          server->sendContent("data-type='" + String(buttonConfigs[i].type) + "' ");
+          server->sendContent("data-data='" + String(buttonConfigs[i].data) + "' ");
+          server->sendContent("data-length='" + String(buttonConfigs[i].length) + "' ");
+          server->sendContent("data-address='" + String(buttonConfigs[i].address) + "' ");
+          server->sendContent("data-repeat='" + String(buttonConfigs[i].repeat) + "' ");
+          server->sendContent("data-out='" + String(buttonConfigs[i].out) + "'>");
+      }
       server->sendContent(String(buttonConfigs[i].name)); // Button-Beschriftung
       server->sendContent("</button>\n");
     }
-  }
+}
 
   if (!anyButtonConfigured) {
       server->sendContent("            <p><em>No remote buttons configured yet.</em></p>\n");
@@ -2041,34 +2189,50 @@ server->sendContent("      </div><hr />\n"); // Trennlinie vor den Pin-Infos
       server->sendContent("          if (event.target.classList.contains('remote-button')) {\n");
       server->sendContent("            event.preventDefault();\n");
       server->sendContent("            const button = event.target;\n");
-      server->sendContent("            const irData = {\n");
-      server->sendContent("              type: button.dataset.type,\n");
-      server->sendContent("              data: button.dataset.data,\n");
-      server->sendContent("              length: parseInt(button.dataset.length, 10),\n");
-      server->sendContent("              address: button.dataset.address,\n");
-      server->sendContent("              repeat: parseInt(button.dataset.repeat, 10),\n");
-      server->sendContent("              out: parseInt(button.dataset.out, 10)\n");
-      server->sendContent("            };\n");
-      server->sendContent("            console.log('Sending IR:', irData);\n");
+      server->sendContent("            const isMacro = button.dataset.isMacro === 'true';\n"); // Prüfe das neue Attribut
+      
       // Visuelles Feedback (optional)
       server->sendContent("            button.classList.add('btn-warning'); \n");
       server->sendContent("            setTimeout(() => { button.classList.remove('btn-warning'); }, 500);\n");
-    
-      server->sendContent("            fetch('/sendbutton', {\n");
-      server->sendContent("              method: 'POST',\n");
-      server->sendContent("              headers: {\n");
-      server->sendContent("                'Content-Type': 'application/json'\n");
-      // Optional: Wenn Passcode/Auth benötigt wird, hier hinzufügen
-      // server->sendContent("                'Authorization': 'Bearer your_token_or_passcode'\n");
-      server->sendContent("              },\n");
-      server->sendContent("              body: JSON.stringify(irData)\n");
-      server->sendContent("            })\n");
-      server->sendContent("            .then(response => {\n");
-      server->sendContent("              if (!response.ok) { console.error('Error sending IR command'); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); }\n");
-      server->sendContent("              return response.text();\n");
-      server->sendContent("            })\n");
-      server->sendContent("            .then(data => console.log('Server response:', data))\n");
-      server->sendContent("            .catch(error => { console.error('Fetch error:', error); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); });\n");
+      
+      server->sendContent("            if (isMacro) {\n"); // Wenn es ein Makro ist
+      server->sendContent("              const macroJsonString = button.dataset.macroJson;\n");
+      // Korrektur: HTML-Entities wieder in Zeichen umwandeln, bevor sie gesendet werden
+      server->sendContent("              const tempElem = document.createElement('textarea'); tempElem.innerHTML = macroJsonString; const decodedJson = tempElem.value;\n");
+      server->sendContent("              console.log('Sending Macro JSON:', decodedJson);\n");
+      server->sendContent("              fetch('/json?pass=" + String(passcode) + "', { // Füge ggf. Passcode hinzu\n"); // Sende an /json
+      server->sendContent("                method: 'POST',\n");
+      server->sendContent("                headers: { 'Content-Type': 'text/plain' },\n"); // /json erwartet 'plain'
+      server->sendContent("                body: decodedJson\n"); // Sende den JSON-String als Body
+      server->sendContent("              })\n");
+      server->sendContent("              .then(response => {\n");
+      server->sendContent("                if (!response.ok) { console.error('Error sending macro command:', response.statusText); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); }\n");
+      server->sendContent("                return response.text();\n");
+      server->sendContent("              })\n");
+      server->sendContent("              .then(data => console.log('Server response (macro):', data))\n");
+      server->sendContent("              .catch(error => { console.error('Fetch error (macro):', error); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); });\n");
+      server->sendContent("            } else {\n"); // Andernfalls (Single Code, wie bisher)
+      server->sendContent("              const irData = {\n");
+      server->sendContent("                type: button.dataset.type,\n");
+      server->sendContent("                data: button.dataset.data,\n");
+      server->sendContent("                length: parseInt(button.dataset.length, 10),\n");
+      server->sendContent("                address: button.dataset.address,\n");
+      server->sendContent("                repeat: parseInt(button.dataset.repeat, 10),\n");
+      server->sendContent("                out: parseInt(button.dataset.out, 10)\n");
+      server->sendContent("              };\n");
+      server->sendContent("              console.log('Sending Single IR:', irData);\n");
+      server->sendContent("              fetch('/sendbutton', {\n"); // Sende an /sendbutton
+      server->sendContent("                method: 'POST',\n");
+      server->sendContent("                headers: { 'Content-Type': 'application/json' },\n");
+      server->sendContent("                body: JSON.stringify(irData)\n");
+      server->sendContent("              })\n");
+      server->sendContent("              .then(response => {\n");
+      server->sendContent("                if (!response.ok) { console.error('Error sending IR command'); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); }\n");
+      server->sendContent("                return response.text();\n");
+      server->sendContent("              })\n");
+      server->sendContent("              .then(data => console.log('Server response (single):', data))\n");
+      server->sendContent("              .catch(error => { console.error('Fetch error (single):', error); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); });\n");
+      server->sendContent("            }\n"); // Ende else (Single Code)
       server->sendContent("          }\n");
       server->sendContent("        });\n");
       server->sendContent("      </script>\n");
