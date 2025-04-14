@@ -154,12 +154,178 @@ struct ButtonConfig {
 ButtonConfig buttonConfigs[MAX_BUTTONS]; // Array für Button-Konfigurationen
 //+=============================================================================
 
+//+=============================================================================
+// Macro Configuration
+//+=============================================================================
+const int MAX_MACROS = 4; // Maximale Anzahl an Makro-Buttons
+
+struct MacroConfig {
+  char name[32] = "";      // Name des Makro-Buttons
+  String jsonDefinition = ""; // Die JSON-Definition der Makro-Sequenz
+  bool configured = false; // Ist dieser Makro-Slot konfiguriert?
+};
+
+MacroConfig macroConfigs[MAX_MACROS]; // Array für Makro-Konfigurationen
+//+=============================================================================
+
+
+// === PROGMEM Strings für HTML ===
+const char HTML_HEADER[] PROGMEM = R"=====(
+  <!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'>
+  <html xmlns='http://www.w3.org/1999/xhtml' xml:lang='en'>
+    <head>
+      <meta name='viewport' content='width=device-width, initial-scale=.75' />
+      <link rel='stylesheet' href='https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css' />
+      <style>@media (max-width: 991px) {.nav-pills>li {float: none; margin-left: 0; margin-top: 5px; text-align: center;}}</style>
+      <title>ESP32 IR Controller (%HOSTNAME%)</title>
+    </head>
+    <body>
+      <div class='container'>
+        <h1><a href='https://github.com/baumrasen/ESP8266-HTTP-IR-Blaster'>Extended ESP32 IR Controller</a></h1>
+        <div class='row'>
+          <div class='col-md-12'>
+            <ul class='nav nav-pills'>
+              <li class='active'><a href='http://%HOSTNAME%.local:%PORT%'>Hostname <span class='badge'>%HOSTNAME%.local:%PORT%</span></a></li>
+              <li class='active'><a href='http://%LOCALIP%:%PORT%'>Local <span class='badge'>%LOCALIP%:%PORT%</span></a></li>
+              <li class='active'><a href='http://%DNSIP%'>DNS <span class='badge'>%DNSIP%</span></a></li>
+              <li class='active'><a href='http://%EXTIP%:%PORT%'>External <span class='badge'>%EXTIP%:%PORT%</span></a></li>
+              <li class='active'><a>MAC <span class='badge'>%MAC%</span></a></li>
+            </ul>
+          </div>
+        </div><hr />
+  )=====";
+  
+  const char HTML_FOOTER_BASE[] PROGMEM = R"=====(
+        <div class='row'><div class='col-md-12'><em>%UPTIME%ms uptime; EPOCH %EPOCH%</em> / <em id='jepoch'></em> ( <em id='jdiff'></em> )</div></div>
+        <script>document.getElementById('jepoch').innerHTML = Math.round((new Date()).getTime() / 1000);</script>
+        <script>document.getElementById('jdiff').innerHTML = Math.abs(Math.round((new Date()).getTime() / 1000) - %EPOCH%);</script>
+  )=====";
+  
+  // Einzelne Fehlermeldungen für den Footer
+  const char FOOTER_MSG_SECURED[] PROGMEM = "<div class='row'><div class='col-md-12'><em>Device secured with SHA256 authentication. Only commands sent and verified with Amazon Alexa and the IR Controller Skill will be processed</em></div></div>";
+  const char FOOTER_MSG_AUTH_ERR[] PROGMEM = "<div class='row'><div class='col-md-12'><em>Error - last authentication failed because HMAC signatures did not match, see serial output for debugging details</em></div></div>";
+  const char FOOTER_MSG_TIME_ERR[] PROGMEM = "<div class='row'><div class='col-md-12'><em>Error - last authentication failed because your timestamps are out of sync, see serial output for debugging details. Timediff: %TIMEDIFF%</em></div></div>"; // Platzhalter hinzugefügt
+  const char FOOTER_MSG_EXTIP_ERR[] PROGMEM = "<div class='row'><div class='col-md-12'><em>Error - unable to retrieve external IP address, this may be due to bad network settings.</em></div></div>";
+  const char FOOTER_MSG_EPOCH_ERR[] PROGMEM = "<div class='row'><div class='col-md-12'><em>Error - EPOCH time is inappropriately low, likely connection to external time server has failed, check your network settings</em></div></div>";
+  const char FOOTER_MSG_UID_ERR[] PROGMEM = "<div class='row'><div class='col-md-12'><em>Error - your userID is in the wrong format and authentication will not work</em></div></div>";
+  const char FOOTER_MSG_NTP_ERR[] PROGMEM = "<div class='row'><div class='col-md-12'><em>Error - last attempt to connect to the NTP server failed, check NTP settings and networking settings</em></div></div>";
+  
+  const char HTML_FOOTER_END[] PROGMEM = R"=====(
+      </div>
+    </body>
+  </html>
+  )=====";
+  // === ENDE PROGMEM Strings ===
+
+
+// === PROGMEM Strings für JavaScript ===
+const char JS_REMOTE_BUTTONS[] PROGMEM = R"=====(
+<script>
+  document.getElementById('remote-buttons').addEventListener('click', function(event) {
+    if (event.target.classList.contains('remote-button')) {
+      event.preventDefault();
+      const button = event.target;
+      const irData = {
+        type: button.dataset.type,
+        data: button.dataset.data,
+        length: parseInt(button.dataset.length, 10),
+        address: button.dataset.address,
+        repeat: parseInt(button.dataset.repeat, 10),
+        out: parseInt(button.dataset.out, 10)
+      };
+      console.log('Sending IR:', irData);
+      button.classList.add('btn-warning');
+      setTimeout(() => { button.classList.remove('btn-warning'); }, 500);
+
+      fetch('/sendbutton', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(irData)
+      })
+      .then(response => {
+        if (!response.ok) { console.error('Error sending IR command'); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); }
+        return response.text();
+      })
+      .then(data => console.log('Server response:', data))
+      .catch(error => { console.error('Fetch error:', error); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); });
+    }
+  });
+</script>
+)=====";
+
+const char JS_MACRO_BUTTONS[] PROGMEM = R"=====(
+<script>
+  document.getElementById('macro-buttons').addEventListener('click', function(event) {
+    if (event.target.classList.contains('macro-button')) {
+      event.preventDefault();
+      const button = event.target;
+      const macroJsonString = button.dataset.json;
+      if (!macroJsonString) { console.error('Macro JSON definition not found on button.'); return; }
+      console.log('Sending Macro JSON:', macroJsonString);
+      button.classList.add('btn-warning');
+      setTimeout(() => { button.classList.remove('btn-warning'); }, 800);
+
+      fetch('/sendmacro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonDefinition: macroJsonString })
+      })
+      .then(response => {
+        if (!response.ok) { console.error('Error sending macro command'); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1500); }
+        else { button.classList.add('btn-success'); setTimeout(() => { button.classList.remove('btn-success'); }, 800); }
+        return response.text();
+      })
+      .then(data => console.log('Server response (macro):', data))
+      .catch(error => { console.error('Fetch error (macro):', error); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1500); });
+    }
+  });
+</script>
+)=====";
+// === ENDE PROGMEM JavaScript ===
+
+// === PROGMEM Arrays for Dropdowns ===
+struct IrTypeOption {
+  const char* value;
+  const char* name;
+};
+
+// Array for IR Protocol Types
+const IrTypeOption IR_TYPES[] PROGMEM = {
+  {"nec", "NEC"}, {"sony", "SONY"}, {"rc5", "RC5"}, {"rc6", "RC6"},
+  {"panasonic", "PANASONIC"}, {"lg", "LG"}, {"jvc", "JVC"},
+  {"samsung", "SAMSUNG"}, {"whynter", "WHYNTER"}, {"coolix", "COOLIX"},
+  {"denon", "DENON"}, {"sharp", "SHARP"}, {"sharpraw", "SHARPRAW"},
+  {"dish", "DISH"}, {"gree", "GREE"}, {"lutron", "LUTRON"},
+  {"roomba", "ROOMBA"}, {"ecoclim", "ECOCLIM"}
+  // Add more types here if needed, matching the values used elsewhere
+};
+const int NUM_IR_TYPES = sizeof(IR_TYPES) / sizeof(IrTypeOption);
+
+// Array for Output Pins (optional, but consistent)
+// We can generate this dynamically too, but for consistency:
+struct OutPinOption {
+    const char* value;
+    const char* name; // We'll construct the name dynamically
+    uint16_t pinNumber;
+};
+
+const OutPinOption OUT_PINS[] PROGMEM = {
+    {"1", "1 (GPIO %d)", pins1},
+    {"2", "2 (GPIO %d)", pins2},
+    {"3", "3 (GPIO %d)", pins3},
+    {"4", "4 (GPIO %d)", pins4}
+};
+const int NUM_OUT_PINS = sizeof(OUT_PINS) / sizeof(OutPinOption);
+// === END PROGMEM Dropdown Arrays ===
+
 
 //+=============================================================================
 // Callback notifying us of the need to save config
 //
 void saveConfigCallback () {
+  #ifdef DEBUG_MODE
   Serial.println("Should save config");
+  #endif
   shouldSaveConfig = true;
 }
 
@@ -169,12 +335,17 @@ void saveConfigCallback () {
 //
 void loadButtonConfig() {
   if (!LittleFS.begin()) {
+    #ifdef DEBUG_MODE
     Serial.println("Failed to mount LittleFS for button config loading.");
+    #endif
+
     return;
   }
 
   if (LittleFS.exists("/buttons.json")) {
+    #ifdef DEBUG_MODE
     Serial.println("Reading button config file");
+    #endif
     File configFile = LittleFS.open("/buttons.json", "r");
     if (configFile) {
       DynamicJsonDocument jsonDoc(2048); // Größe ggf. anpassen (9 Buttons * ~150 Zeichen)
@@ -209,18 +380,26 @@ void loadButtonConfig() {
 
           count++;
         }
+        #ifdef DEBUG_MODE
         Serial.println("Button config loaded successfully.");
+        #endif
       } else {
+        #ifdef DEBUG_MODE
         Serial.print("Failed to parse buttons.json: ");
         Serial.println(error.c_str());
+        #endif
         // Bei Fehler: Alle Buttons als nicht konfiguriert markieren
         for(int i=0; i<MAX_BUTTONS; ++i) buttonConfigs[i].configured = false;
       }
     } else {
+      #ifdef DEBUG_MODE
       Serial.println("Failed to open buttons.json for reading.");
+      #endif
     }
   } else {
+    #ifdef DEBUG_MODE
     Serial.println("buttons.json not found. Initializing with defaults.");
+    #endif
     // Datei existiert nicht, alle als nicht konfiguriert belassen
     for(int i=0; i<MAX_BUTTONS; ++i) buttonConfigs[i].configured = false;
   }
@@ -232,7 +411,9 @@ void loadButtonConfig() {
 //
 void saveButtonConfig() {
   if (!LittleFS.begin()) {
+    #ifdef DEBUG_MODE
     Serial.println("Failed to mount LittleFS for button config saving.");
+    #endif
     return;
   }
 
@@ -259,17 +440,257 @@ void saveButtonConfig() {
 
   File configFile = LittleFS.open("/buttons.json", "w");
   if (!configFile) {
+    #ifdef DEBUG_MODE
     Serial.println("Failed to open buttons.json for writing.");
+    #endif
     return;
   }
 
   if (serializeJson(jsonDoc, configFile) == 0) {
+    #ifdef DEBUG_MODE
     Serial.println("Failed to write to buttons.json.");
+    #endif
   } else {
+    #ifdef DEBUG_MODE
     Serial.println("Button config saved successfully.");
+    #endif
   }
   configFile.close();
   // LittleFS.end(); // Nicht hier beenden
+}
+
+// ... (nach saveButtonConfig()) ...
+
+//+=============================================================================
+// Load Macro Configuration from LittleFS
+//
+void loadMacroConfig() {
+  if (!LittleFS.begin()) { // Sicherstellen, dass FS gemountet ist
+    #ifdef DEBUG_MODE
+    Serial.println("Failed to mount LittleFS for macro config loading.");
+    #endif
+    return;
+  }
+
+  if (LittleFS.exists("/macros.json")) {
+    #ifdef DEBUG_MODE
+    Serial.println("Reading macro config file");
+    #endif
+    File configFile = LittleFS.open("/macros.json", "r");
+    if (configFile) {
+      // Größe dynamisch anpassen, Makro-JSONs können groß sein
+      DynamicJsonDocument jsonDoc(4096); // Ggf. erhöhen, falls Makros sehr lang sind
+      DeserializationError error = deserializeJson(jsonDoc, configFile);
+      configFile.close();
+
+      if (!error) {
+        JsonArray macroArray = jsonDoc.as<JsonArray>();
+        int count = 0;
+        for (JsonObject macroJson : macroArray) {
+          if (count >= MAX_MACROS) break;
+
+          strncpy(macroConfigs[count].name, macroJson["name"] | "", sizeof(macroConfigs[count].name) - 1);
+          // Direkt als String zuweisen
+          macroConfigs[count].jsonDefinition = macroJson["jsonDefinition"].as<String>();
+          macroConfigs[count].configured = macroJson["configured"] | false;
+
+          // Sicherstellen, dass Name null-terminiert ist
+          macroConfigs[count].name[sizeof(macroConfigs[count].name) - 1] = '\0';
+
+          // Validierung: Wenn Name oder JSON-Definition fehlen, ist er nicht konfiguriert
+          if (strlen(macroConfigs[count].name) == 0 || macroConfigs[count].jsonDefinition.length() == 0) {
+             macroConfigs[count].configured = false;
+          }
+
+          count++;
+        }
+        #ifdef DEBUG_MODE
+        Serial.println("Macro config loaded successfully.");
+        #endif
+      } else {
+        #ifdef DEBUG_MODE
+        Serial.print("Failed to parse macros.json: ");
+        Serial.println(error.c_str());
+        #endif
+        for(int i=0; i<MAX_MACROS; ++i) macroConfigs[i].configured = false;
+      }
+    } else {
+      #ifdef DEBUG_MODE
+      Serial.println("Failed to open macros.json for reading.");
+      #endif
+    }
+  } else {
+    #ifdef DEBUG_MODE
+    Serial.println("macros.json not found. Initializing with defaults.");
+    #endif
+    for(int i=0; i<MAX_MACROS; ++i) macroConfigs[i].configured = false;
+  }
+  // LittleFS.end(); // Nicht hier beenden
+}
+
+//+=============================================================================
+// Save Macro Configuration to LittleFS
+//
+void saveMacroConfig() {
+  if (!LittleFS.begin()) { // Sicherstellen, dass FS gemountet ist
+    #ifdef DEBUG_MODE
+    Serial.println("Failed to mount LittleFS for macro config saving.");
+    #endif
+    return;
+  }
+
+  // Größe dynamisch anpassen
+  DynamicJsonDocument jsonDoc(4096); // Ggf. erhöhen
+  JsonArray macroArray = jsonDoc.to<JsonArray>();
+
+  for (int i = 0; i < MAX_MACROS; ++i) {
+    JsonObject macroJson = macroArray.createNestedObject();
+    if (macroConfigs[i].configured && strlen(macroConfigs[i].name) > 0 && macroConfigs[i].jsonDefinition.length() > 0) {
+        macroJson["name"] = macroConfigs[i].name;
+        macroJson["jsonDefinition"] = macroConfigs[i].jsonDefinition; // String direkt speichern
+        macroJson["configured"] = true;
+    } else {
+        macroJson["configured"] = false; // Leeren Eintrag speichern
+    }
+  }
+
+  File configFile = LittleFS.open("/macros.json", "w");
+  if (!configFile) {
+    #ifdef DEBUG_MODE
+    Serial.println("Failed to open macros.json for writing.");
+    #endif
+    return;
+  }
+
+  if (serializeJson(jsonDoc, configFile) == 0) {
+    #ifdef DEBUG_MODE
+    Serial.println("Failed to write to macros.json.");
+    #endif
+  } else {
+    #ifdef DEBUG_MODE
+    Serial.println("Macro config saved successfully.");
+    #endif
+  }
+  configFile.close();
+  // LittleFS.end(); // Nicht hier beenden
+}
+
+//+=============================================================================
+// Execute commands defined in a JSON array
+// root: The JsonDocument (must be an array) containing the commands
+// default_out_pin: The default output pin to use if not specified in the command object
+//
+void executeJsonCommands(JsonDocument& root, int default_out_pin) {
+  if (!root.is<JsonArray>()) {
+      #ifdef DEBUG_MODE
+      Serial.println("Error: executeJsonCommands expects a JSON array.");
+      #endif
+      return;
+  }
+  JsonArray commandArray = root.as<JsonArray>();
+
+  String message = "Macro execution started."; // Or some initial message
+
+  for (JsonObject command : commandArray) {
+      String type = command["type"] | "unknown"; // Default to avoid null
+      String ip = command["ip"] | "";
+      int rdelay = command["rdelay"] | 1000; // Default rdelay
+      int pulse = command["pulse"] | 1;     // Default pulse
+      int pdelay = command["pdelay"] | 100;  // Default pdelay
+      int repeat = command["repeat"] | 1;   // Default repeat
+      int xout = command["out"] | default_out_pin; // Use command 'out' or default
+      int duty = command["duty"] | 50;      // Default duty
+
+      // Ensure valid values
+      if (pulse <= 0) pulse = 1;
+      if (repeat <= 0) repeat = 1;
+      if (pdelay <= 0) pdelay = 100;
+      if (rdelay <= 0) rdelay = 1000;
+      if (duty <= 0 || duty > 100) duty = 50;
+      if (xout < 1 || xout > 4) xout = default_out_pin; // Fallback to default if invalid
+
+      // Handle device state limitations (optional, could be adapted if needed for macros)
+      /*
+      String device = command["device"];
+      if (device != "null") {
+          int state = command["state"];
+          if (deviceState.containsKey(device)) {
+              int currentState = deviceState[device];
+              if (state == currentState) {
+                  Serial.println("Macro step skipped: Not sending command to " + device + ", already in state " + String(state));
+                  message = "Macro executed. Some steps skipped due to device state.";
+                  continue; // Skip this command in the macro
+              } else {
+                  Serial.println("Macro step: Setting device " + device + " to state " + String(state));
+                  deviceState[device] = state;
+              }
+          } else {
+              Serial.println("Macro step: Setting device " + device + " to state " + String(state));
+              deviceState[device] = state;
+          }
+      }
+      */
+      #ifdef DEBUG_MODE
+      Serial.println("Executing macro step: type=" + type);
+      #endif
+
+      if (type == "delay") {
+          Serial.println(" -> Delaying for " + String(rdelay) + "ms");
+          delay(rdelay);
+      } else if (type == "raw") {
+          // JsonVariantConst rawVariant = command["data"]; // OLD
+          JsonVariant rawVariant = command["data"];      // NEW: Use non-const JsonVariant
+          if (rawVariant.is<JsonArray>()) {
+              JsonArray raw = rawVariant.as<JsonArray>(); // Now this should work
+              int khz = command["khz"] | 38; // Default to 38khz
+              if (khz <= 0) khz = 38;
+              Serial.println(" -> Sending RAW, khz=" + String(khz) + ", repeat=" + String(repeat));
+              rawblast(raw, khz, rdelay, pulse, pdelay, repeat, pickIRsend(xout), duty, xout);
+          } else {
+               Serial.println(" -> Error: 'data' for raw type is not an array.");
+          }
+  
+      } else if (type == "pronto") {
+          // JsonVariantConst prontoVariant = command["data"]; // OLD
+          JsonVariant prontoVariant = command["data"];      // NEW: Use non-const JsonVariant
+          if (prontoVariant.is<JsonArray>()) {
+             JsonArray pdata = prontoVariant.as<JsonArray>(); // Now this should work
+             Serial.println(" -> Sending Pronto, repeat=" + String(repeat));
+             pronto(pdata, rdelay, pulse, pdelay, repeat, pickIRsend(xout), xout);
+          } else {
+              Serial.println(" -> Error: 'data' for pronto type is not an array.");
+          }
+ 
+      } else if (type == "roku") {
+          String data = command["data"] | "";
+          if (ip.length() > 0 && data.length() > 0) {
+              Serial.println(" -> Sending Roku command '" + data + "' to " + ip + ", repeat=" + String(repeat));
+              rokuCommand(ip, data, repeat, rdelay);
+          } else {
+               Serial.println(" -> Error: Missing 'ip' or 'data' for roku type.");
+          }
+      } else if (type != "unknown") { // Handle standard IR types
+          String data = command["data"] | "";
+          String addressString = command["address"] | "0x0";
+          long address = strtoul(addressString.c_str(), 0, 0);
+          int len = command["length"] | 0;
+
+          if (data.length() > 0 && len > 0) {
+              Serial.println(" -> Sending IR: type=" + type + ", data=" + data + ", len=" + String(len) + ", addr=" + addressString + ", repeat=" + String(repeat));
+              irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(xout), xout);
+          } else {
+               Serial.println(" -> Error: Missing 'data' or 'length' for IR type '" + type + "'.");
+          }
+      } else {
+          Serial.println(" -> Error: Unknown or missing 'type' in macro step.");
+      }
+
+      // Optional small delay between macro steps if not a delay command itself
+      if (type != "delay" && command != commandArray[commandArray.size()-1]) { // Don't delay after the last step
+           delay(50); // Small pause between commands
+      }
+  }
+  Serial.println("Macro execution finished.");
 }
 
 
@@ -777,47 +1198,49 @@ void handleButtonConfigPage() {
   server->sendContent("          <p>Enter the details for each button you want to configure. Leave the 'Name' field empty to disable a button slot.</p>\n");
   server->sendContent("          <form class='form-horizontal' action='/savebuttons' method='post'>\n");
 
-  // --- Helper Lambdas for Dropdowns (um Code-Duplizierung zu vermeiden) ---
+  // --- Helper Lambdas for Dropdowns (OPTIMIZED WITH PROGMEM) ---
   auto generateTypeDropdown = [&](const String& selectName, const String& selectedValue) {
     String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
-    auto addSelected = [&](const String& val) { return val.equalsIgnoreCase(selectedValue) ? " selected" : ""; };
-    // --- KORREKTUR: String(...) verwenden ---
-    html += String("  <option value='nec'") + addSelected("nec") + ">NEC</option>\n";
-    html += String("  <option value='sony'") + addSelected("sony") + ">SONY</option>\n";
-    html += String("  <option value='rc5'") + addSelected("rc5") + ">RC5</option>\n";
-    html += String("  <option value='rc6'") + addSelected("rc6") + ">RC6</option>\n";
-    html += String("  <option value='panasonic'") + addSelected("panasonic") + ">PANASONIC</option>\n";
-    html += String("  <option value='lg'") + addSelected("lg") + ">LG</option>\n";
-    html += String("  <option value='jvc'") + addSelected("jvc") + ">JVC</option>\n";
-    html += String("  <option value='samsung'") + addSelected("samsung") + ">SAMSUNG</option>\n";
-    html += String("  <option value='whynter'") + addSelected("whynter") + ">WHYNTER</option>\n";
-    html += String("  <option value='coolix'") + addSelected("coolix") + ">COOLIX</option>\n";
-    html += String("  <option value='denon'") + addSelected("denon") + ">DENON</option>\n";
-    html += String("  <option value='sharp'") + addSelected("sharp") + ">SHARP</option>\n";
-    html += String("  <option value='sharpraw'") + addSelected("sharpraw") + ">SHARPRAW</option>\n";
-    html += String("  <option value='dish'") + addSelected("dish") + ">DISH</option>\n";
-    html += String("  <option value='gree'") + addSelected("gree") + ">GREE</option>\n";
-    html += String("  <option value='lutron'") + addSelected("lutron") + ">LUTRON</option>\n";
-    html += String("  <option value='roomba'") + addSelected("roomba") + ">ROOMBA</option>\n";
-    html += String("  <option value='ecoclim'") + addSelected("ecoclim") + ">ECOCLIM</option>\n";
-    // Füge hier weitere Typen hinzu, falls nötig.
+    for (int i = 0; i < NUM_IR_TYPES; ++i) {
+        // Read data from PROGMEM using FPSTR() for ESP32
+        String value = FPSTR(pgm_read_ptr(&IR_TYPES[i].value));
+        String name = FPSTR(pgm_read_ptr(&IR_TYPES[i].name));
+
+        html += "  <option value='" + value + "'";
+        if (value.equalsIgnoreCase(selectedValue)) {
+            html += " selected";
+        }
+        html += ">" + name + "</option>\n";
+    }
     html += "</select>\n";
     return html;
-  };
+};
 
-  auto generateOutDropdown = [&](const String& selectName, int selectedValue) {
-      String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
-      auto addOutSelected = [&](int val) { return (val == selectedValue) ? " selected" : ""; };
-      
-      // --- KORREKTUR: String(...) verwenden ---
-      html += String("  <option value='1'") + addOutSelected(1) + ">1 (GPIO " + String(pins1) + ")</option>\n";
-      html += String("  <option value='2'") + addOutSelected(2) + ">2 (GPIO " + String(pins2) + ")</option>\n";
-      html += String("  <option value='3'") + addOutSelected(3) + ">3 (GPIO " + String(pins3) + ")</option>\n";
-      html += String("  <option value='4'") + addOutSelected(4) + ">4 (GPIO " + String(pins4) + ")</option>\n";
-      html += "</select>\n";
-      return html;
-  };
-  // --- Ende Helper Lambdas ---
+auto generateOutDropdown = [&](const String& selectName, int selectedValue) {
+    String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
+    String selectedValueStr = String(selectedValue); // Convert once for comparison
+
+    for (int i = 0; i < NUM_OUT_PINS; ++i) {
+        // Read data from PROGMEM
+        String value = FPSTR(pgm_read_ptr(&OUT_PINS[i].value));
+        String name_fmt = FPSTR(pgm_read_ptr(&OUT_PINS[i].name));
+        uint16_t pin_num = pgm_read_word(&OUT_PINS[i].pinNumber); // Read the pin number
+
+        // Format the display name
+        char name_buffer[40];
+        snprintf(name_buffer, sizeof(name_buffer), name_fmt.c_str(), pin_num);
+        String name = String(name_buffer);
+
+        html += "  <option value='" + value + "'";
+        if (value == selectedValueStr) { // Compare as strings
+            html += " selected";
+        }
+        html += ">" + name + "</option>\n";
+    }
+    html += "</select>\n";
+    return html;
+};
+// --- Ende Helper Lambdas ---
 
 
   for (int i = 0; i < MAX_BUTTONS; ++i) {
@@ -960,6 +1383,190 @@ void handleSaveButtons() {
   // Redirect back to home page after saving
   server->sendHeader("Location", "/?status=buttons_saved"); // Optional: Status für Feedback
   server->send(303); // 303 See Other
+}
+
+
+// ... (nach handleSendButton oder wo es passt) ...
+
+//+=============================================================================
+// Handler for Macro Configuration Page
+//
+void handleMacroConfigPage() {
+  Serial.println("Connection received endpoint '/macros' (GET)");
+
+  // --- Security Check (optional) ---
+  // if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) { ... return; }
+
+  sendHeader(); // Send standard HTML header
+
+  server->sendContent("      <div class='row'>\n");
+  server->sendContent("        <div class='col-md-12'>\n");
+  server->sendContent("          <h2>Configure Macro Buttons</h2>\n");
+  server->sendContent("          <p>Define sequences of commands using JSON format (similar to the /json endpoint). Leave 'Name' empty to disable a macro slot.</p>\n");
+  server->sendContent("          <form class='form-horizontal' action='/savemacros' method='post'>\n");
+
+  for (int i = 0; i < MAX_MACROS; ++i) {
+    String prefix = "macro" + String(i) + "_"; // Prefix für Feldnamen
+
+    server->sendContent("            <hr><h4>Macro " + String(i + 1) + "</h4>\n");
+
+    // Name
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Macro Label (e.g., Movie Time)' value='" + String(macroConfigs[i].name) + "'></div>\n");
+    server->sendContent("            </div>\n");
+
+    // JSON Definition (Textarea)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='" + prefix + "json' class='col-sm-2 control-label'>JSON Definition</label>\n");
+    server->sendContent("              <div class='col-sm-10'><textarea class='form-control' id='" + prefix + "json' name='" + prefix + "json' rows='8' placeholder='[{\"type\":\"nec\",\"data\":\"FF02FD\",\"length\":32}, {\"type\":\"delay\",\"rdelay\":500}, {\"type\":\"sony\",\"data\":\"A90\",\"length\":12}]'>" + macroConfigs[i].jsonDefinition + "</textarea></div>\n");
+    server->sendContent("            </div>\n");
+  }
+
+  // Submit Button
+  server->sendContent("            <hr><div class='form-group'>\n");
+  server->sendContent("              <div class='col-sm-offset-2 col-sm-10'>\n");
+  server->sendContent("                <button type='submit' class='btn btn-success'>Save Macro Configuration</button>\n");
+  server->sendContent("                <a href='/' class='btn btn-default'>Cancel</a>\n");
+  server->sendContent("              </div>\n");
+  server->sendContent("            </div>\n");
+
+  server->sendContent("          </form>\n");
+  server->sendContent("        </div>\n");
+  server->sendContent("      </div>\n");
+
+  sendFooter(); // Send standard HTML footer
+}
+
+
+//+=============================================================================
+// Handler to Save Macro Configuration
+//
+void handleSaveMacros() {
+  Serial.println("Connection received endpoint '/savemacros' (POST)");
+
+  // --- Security Check (optional) ---
+  // if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) { ... return; }
+
+  bool changed = false;
+  for (int i = 0; i < MAX_MACROS; ++i) {
+    String prefix = "macro" + String(i) + "_";
+
+    String name = server->arg(prefix + "name");
+    String jsonDef = server->arg(prefix + "json");
+
+    // Trim whitespace
+    name.trim();
+    jsonDef.trim(); // Auch JSON trimmen
+
+    // Grundlegende Validierung: Makro ist konfiguriert, wenn Name und JSON vorhanden sind
+    // Optional: JSON-Validierung hier hinzufügen (kann aufwändig sein)
+    bool isConfigured = (name.length() > 0 && jsonDef.length() > 0);
+
+    // Nur aktualisieren, wenn sich etwas geändert hat oder der Status sich ändert
+    if (isConfigured != macroConfigs[i].configured ||
+        (isConfigured && (name != macroConfigs[i].name || jsonDef != macroConfigs[i].jsonDefinition)))
+    {
+        changed = true;
+        strncpy(macroConfigs[i].name, name.c_str(), sizeof(macroConfigs[i].name) - 1);
+        macroConfigs[i].name[sizeof(macroConfigs[i].name) - 1] = '\0'; // Null-terminieren
+
+        if (isConfigured) {
+            macroConfigs[i].jsonDefinition = jsonDef; // String zuweisen
+            macroConfigs[i].configured = true;
+        } else {
+            // Makro deaktivieren/leeren
+            macroConfigs[i].name[0] = '\0';
+            macroConfigs[i].jsonDefinition = "";
+            macroConfigs[i].configured = false;
+        }
+    }
+  }
+
+  if (changed) {
+    Serial.println("Macro configuration changed, saving...");
+    saveMacroConfig();
+  } else {
+    Serial.println("No changes detected in macro configuration.");
+  }
+
+  // Redirect back to home page after saving
+  server->sendHeader("Location", "/?status=macros_saved"); // Optional: Status für Feedback
+  server->send(303); // 303 See Other
+}
+
+
+//+=============================================================================
+// Handler to Execute IR Macro from Button (AJAX)
+//
+void handleSendMacro() {
+  Serial.println("Connection received endpoint '/sendmacro' (POST)");
+
+  // --- Security Check (optional) ---
+  // if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) { ... return; }
+
+  // --- Argument Parsing (aus JSON Body) ---
+  if (server->hasArg("plain") == false || server->method() != HTTP_POST) {
+    Serial.println("Invalid request to /sendmacro");
+    server->send(400, "text/plain", "Bad Request: Missing JSON payload or wrong method.");
+    return;
+  }
+
+  String body = server->arg("plain");
+  DynamicJsonDocument requestJson(256); // Klein, nur für den Request-Wrapper
+  DeserializationError error = deserializeJson(requestJson, body);
+
+  if (error) {
+    Serial.print("Failed to parse request JSON from /sendmacro: ");
+    Serial.println(error.c_str());
+    server->send(400, "text/plain", "Bad Request: Invalid request JSON.");
+    return;
+  }
+
+  // JSON-Definition des Makros aus dem Request extrahieren
+  String jsonDefinition = requestJson["jsonDefinition"] | "";
+
+  if (jsonDefinition.length() == 0) {
+      Serial.println("Invalid arguments received via /sendmacro: Missing jsonDefinition");
+      server->send(400, "text/plain", "Bad Request: Missing 'jsonDefinition'.");
+      return;
+  }
+
+  // --- Parse the actual Macro JSON Definition ---
+  // Größe anpassen, muss die Makro-Definition fassen können
+  DynamicJsonDocument macroDoc(4096); // Ggf. erhöhen
+  DeserializationError macroError = deserializeJson(macroDoc, jsonDefinition);
+
+  if (macroError) {
+      Serial.print("Failed to parse macro JSON definition: ");
+      Serial.println(macroError.c_str());
+      server->send(400, "text/plain", "Bad Request: Invalid macro JSON definition provided.");
+      macroDoc.clear();
+      return;
+  }
+
+   if (!macroDoc.is<JsonArray>()) {
+      Serial.println("Error: Macro definition is not a JSON array.");
+      server->send(400, "text/plain", "Bad Request: Macro definition must be a JSON array.");
+      macroDoc.clear();
+      return;
+   }
+
+  // --- Trigger Macro Execution ---
+  Serial.println("Calling executeJsonCommands for macro...");
+  digitalWrite(ledpin, LOW); // Turn LED on during execution
+  // Schedule LED turn off - maybe longer for macros?
+  ticker.attach(1.5, disableLed); // LED für 1.5s anlassen
+
+  // Call the refactored function
+  // Verwende 1 als Standard-Output-Pin, wenn nicht im Makro-Schritt angegeben
+  executeJsonCommands(macroDoc, 1);
+
+  macroDoc.clear(); // Wichtig: Speicher freigeben
+
+  // --- Send Success Response ---
+  sendCorsHeaders(); // Wichtig für AJAX
+  server->send(200, "text/plain", "OK, Macro executed.");
 }
 
 
@@ -1136,6 +1743,7 @@ void setup() {
   Serial.println("WiFi configuration complete");
 
   loadButtonConfig(); // Lade die Button-Konfigurationen
+  loadMacroConfig();  // Lade die Makro-Konfigurationen
 
   // Set the hostname
   if (strlen(host_name) > 0) {
@@ -1203,29 +1811,41 @@ void setup() {
     Serial.println("MDNS http service added. Hostname is set to " + String(host_name) + ".local:" + String(port));
   }
 
-  // Configure the server
-  server->on("/json", []() { // JSON handler for more complicated IR blaster routines
-    Serial.println("Connection received endpoint '/json'");
+    // In setup(), ersetze den Inhalt des /json Handlers:
+    server->on("/json", []() {
+      Serial.println("Connection received endpoint '/json'");
+  
+      // Alte, fehlerhafte Zeile:
+      // int simple = server->arg("simple").toInt(0); // Default to 0 if not present
 
-    int simple = 0;
-    if (server->hasArg("simple")) simple = server->arg("simple").toInt();
-    String signature = server->arg("auth");
-    String epid = server->arg("epid");
-    String mid = server->arg("mid");
-    String timestamp = server->arg("time");
-
-    if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, invalid passcode");
-    } else if (strlen(user_id) != 0 && !validateHMAC(epid, mid, timestamp, signature, server->client().remoteIP())) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, HMAC security authentication failed");
-    } else {
+      int simple = 0;
+      if (server->hasArg("simple")) simple = server->arg("simple").toInt();
+      String signature = server->arg("auth");
+      String epid = server->arg("epid");
+      String mid = server->arg("mid");
+      String timestamp = server->arg("time");
+  
+      // --- Security Checks ---
+      if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) {
+        Serial.println("Unauthorized access (passcode)");
+        sendCorsHeaders();
+        server->send(401, "text/plain", "Unauthorized, invalid passcode");
+        return; // Stop processing
+      }
+      if (strlen(user_id) != 0 && !validateHMAC(epid, mid, timestamp, signature, server->client().remoteIP())) {
+        Serial.println("Unauthorized access (HMAC)");
+        sendCorsHeaders();
+        server->send(401, "text/plain", "Unauthorized, HMAC security authentication failed");
+        return; // Stop processing
+      }
+  
+      // --- JSON Parsing ---
+      // Adjust size as needed, maybe larger for complex JSON requests
       DynamicJsonDocument root(4096);
       DeserializationError error = deserializeJson(root, server->arg("plain"));
-      int out = (server->hasArg("out")) ? server->arg("out").toInt() : 1;
+      int out = (server->hasArg("out")) ? server->arg("out").toInt() : 1; // Default output pin from query param
+      if (out < 1 || out > 4) out = 1; // Validate default out pin
+  
       if (error) {
         Serial.println("JSON parsing failed");
         Serial.println(error.c_str());
@@ -1233,125 +1853,59 @@ void setup() {
           sendCorsHeaders();
           server->send(400, "text/plain", "JSON parsing failed, " + String(error.c_str()));
         } else {
-          sendHomePage("JSON parsing failed", "Error", 3, 400); // 400
+          sendHomePage("JSON parsing failed: " + String(error.c_str()), "Error", 3, 400);
         }
-        root.clear();
-      } else {
-        digitalWrite(ledpin, LOW);
-        ticker.attach(0.5, disableLed);
-
-        // Handle device state limitations for the global JSON command request
-        if (server->hasArg("device")) {
+        root.clear(); // Clear document on error
+        return; // Stop processing
+      }
+  
+      // --- Optional: Device State Check (Global for the whole request) ---
+      if (server->hasArg("device")) {
           String device = server->arg("device");
-          Serial.println("Device name detected " + device);
+          Serial.println("Device name detected (global): " + device);
           int state = (server->hasArg("state")) ? server->arg("state").toInt() : 0;
           if (deviceState.containsKey(device)) {
-            Serial.println("Contains the key!");
-            Serial.println(state);
-            int currentState = deviceState[device];
-            Serial.println(currentState);
-            if (state == currentState) {
-              if (simple) {
-                sendCorsHeaders();
-                server->send(200, "text/html", "Not sending command to " + device + ", already in state " + state);
-              } else {
-                sendHomePage("Not sending command to " + device + ", already in state " + state, "Warning", 2); // 200
-              }
-              Serial.println("Not sending command to " + device + ", already in state " + state);
-              return;
-            } else {
-              Serial.println("Setting device " + device + " to state " + state);
-              deviceState[device] = state;
-            }
-          } else {
-            Serial.println("Setting device " + device + " to state " + state);
-            deviceState[device] = state;
-          }
-        }
-
-        if (simple) {
-          sendCorsHeaders();
-          server->send(200, "text/html", "Success, code sent");
-        }
-
-        String message = "Code sent";
-
-        for (size_t x = 0; x < root.size(); x++) {
-          String type = root[x]["type"];
-          String ip = root[x]["ip"];
-          int rdelay = root[x]["rdelay"];
-          int pulse = root[x]["pulse"];
-          int pdelay = root[x]["pdelay"];
-          int repeat = root[x]["repeat"];
-          int xout = root[x]["out"];
-          if (xout == 0) {
-            xout = out;
-          }
-          int duty = root[x]["duty"];
-
-          if (pulse <= 0) pulse = 1; // Make sure pulse isn't 0
-          if (repeat <= 0) repeat = 1; // Make sure repeat isn't 0
-          if (pdelay <= 0) pdelay = 100; // Default pdelay
-          if (rdelay <= 0) rdelay = 1000; // Default rdelay
-          if (duty <= 0) duty = 50; // Default duty
-
-          // Handle device state limitations on a per JSON object basis
-          String device = root[x]["device"];
-          if (device != "null") {
-            int state = root[x]["state"];
-            if (deviceState.containsKey(device)) {
               int currentState = deviceState[device];
               if (state == currentState) {
-                Serial.println("Not sending command to " + device + ", already in state " + state);
-                message = "Code sent. Some components of the code were held because device was already in appropriate state";
-                continue;
+                  String msg = "Not executing JSON commands for " + device + ", already in state " + String(state);
+                  Serial.println(msg);
+                  if (simple) {
+                      sendCorsHeaders();
+                      server->send(200, "text/plain", msg); // 200 OK, but indicate no action
+                  } else {
+                      sendHomePage(msg, "Info", 2); // Use Info/Warning type
+                  }
+                  root.clear(); // Clear document
+                  return; // Stop processing
               } else {
-                Serial.println("Setting device " + device + " to state " + state);
-                deviceState[device] = state;
+                  Serial.println("Setting device " + device + " to state " + String(state) + " (global)");
+                  deviceState[device] = state;
               }
-            } else {
-              Serial.println("Setting device " + device + " to state " + state);
-              deviceState[device] = state;
-            }
-          }
-
-          if (type == "delay") {
-            delay(rdelay);
-          } else if (type == "raw") {
-            JsonArray raw = root[x]["data"]; // Array of unsigned int values for the raw signal
-            int khz = root[x]["khz"];
-            if (khz <= 0) khz = 38; // Default to 38khz if not set
-            // OLD: rawblast(raw, khz, rdelay, pulse, pdelay, repeat, pickIRsend(xout),duty);
-            // NEW: Pass 'xout' as the last argument
-            rawblast(raw, khz, rdelay, pulse, pdelay, repeat, pickIRsend(xout), duty, xout);
-          } else if (type == "pronto") {
-            JsonArray pdata = root[x]["data"]; // Array of values for pronto
-            // OLD: pronto(pdata, rdelay, pulse, pdelay, repeat, pickIRsend(xout));
-            // NEW: Pass 'xout' as the last argument
-            pronto(pdata, rdelay, pulse, pdelay, repeat, pickIRsend(xout), xout);
-          } else if (type == "roku") {
-            String data = root[x]["data"];
-            rokuCommand(ip, data, repeat, rdelay);
           } else {
-            String data = root[x]["data"];
-            String addressString = root[x]["address"];
-            long address = strtoul(addressString.c_str(), 0, 0);
-            int len = root[x]["length"];
-            // OLD: irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(xout));
-            // NEW: Pass 'xout' as the last argument
-            irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(xout), xout);
+              Serial.println("Setting device " + device + " to state " + String(state) + " (global)");
+              deviceState[device] = state;
           }
-        }
-
-        if (!simple) {
-          Serial.println("Sending home page");
-          sendHomePage(message, "Success", 1); // 200
-        }
-
-        root.clear();
       }
-    }
-  });
+  
+      // --- Execute Commands ---
+      digitalWrite(ledpin, LOW); // LED on
+      ticker.attach(0.5, disableLed); // Schedule LED off
+  
+      executeJsonCommands(root, out); // Call the refactored function
+  
+      // --- Send Response ---
+      if (simple) {
+        sendCorsHeaders();
+        server->send(200, "text/plain", "Success, JSON commands processed.");
+      } else {
+        Serial.println("Sending home page after JSON execution");
+        // Maybe adjust message based on execution success/partial success?
+        sendHomePage("JSON commands processed", "Success", 1);
+      }
+  
+      root.clear(); // Clear document after use
+    });
+  
 
   // Setup simple msg server to mirror version 1.0 functionality
   server->on("/msg", []() {
@@ -1506,6 +2060,14 @@ void setup() {
     server->on("/savebuttons", HTTP_POST, handleSaveButtons);
     server->on("/sendbutton", HTTP_POST, handleSendButton);
     // --- ENDE NEUE HANDLER ---
+
+    // In setup(), nach den anderen server->on(...)
+    // --- NEUE MAKRO SERVER-HANDLER REGISTRIEREN ---
+    server->on("/macros", HTTP_GET, handleMacroConfigPage);
+    server->on("/savemacros", HTTP_POST, handleSaveMacros);
+    server->on("/sendmacro", HTTP_POST, handleSendMacro);
+    // --- ENDE NEUE MAKRO HANDLER ---
+
 
   server->begin();
   Serial.println("HTTP Server started on port " + String(port));
@@ -1732,63 +2294,52 @@ void sendHeader() {
 
 void sendHeader(int httpcode) {
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server->send(httpcode, "text/html; charset=utf-8", "");
-  server->sendContent("<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Strict//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd'>\n");
-  server->sendContent("<html xmlns='http://www.w3.org/1999/xhtml' xml:lang='en'>\n");
-  server->sendContent("  <head>\n");
-  server->sendContent("    <meta name='viewport' content='width=device-width, initial-scale=.75' />\n");
-  server->sendContent("    <link rel='stylesheet' href='https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css' />\n");
-  server->sendContent("    <style>@media (max-width: 991px) {.nav-pills>li {float: none; margin-left: 0; margin-top: 5px; text-align: center;}}</style>\n");
-  server->sendContent("    <title>ESP32 IR Controller (" + String(host_name) + ")</title>\n");
-  server->sendContent("  </head>\n");
-  server->sendContent("  <body>\n");
-  server->sendContent("    <div class='container'>\n");
-  server->sendContent("      <h1><a href='https://github.com/baumrasen/ESP8266-HTTP-IR-Blaster'>Extended ESP32 IR Controller</a></h1>\n");
-  server->sendContent("      <div class='row'>\n");
-  server->sendContent("        <div class='col-md-12'>\n");
-  server->sendContent("          <ul class='nav nav-pills'>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a href='http://" + String(host_name) + ".local" + ":" + String(port) + "'>Hostname <span class='badge'>" + String(host_name) + ".local" + ":" + String(port) + "</span></a></li>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a href='http://" + WiFi.localIP().toString() + ":" + String(port) + "'>Local <span class='badge'>" + WiFi.localIP().toString() + ":" + String(port) + "</span></a></li>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a href='http://" + WiFi.dnsIP().toString() + "'>DNS <span class='badge'>" + WiFi.dnsIP().toString() + "</span></a></li>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a href='http://" + externalIP() + ":" + String(port) + "'>External <span class='badge'>" + externalIP() + ":" + String(port) + "</span></a></li>\n");
-  server->sendContent("            <li class='active'>\n");
-  server->sendContent("              <a>MAC <span class='badge'>" + String(WiFi.macAddress()) + "</span></a></li>\n");
-  server->sendContent("          </ul>\n");
-  server->sendContent("        </div>\n");
-  server->sendContent("      </div><hr />\n");
+  server->send(httpcode, "text/html; charset=utf-8", ""); // Sendet HTTP-Status und Content-Type
+
+  String header_html = FPSTR(HTML_HEADER); // Lädt den Header-String aus PROGMEM
+
+  // Ersetze die Platzhalter durch die tatsächlichen Werte
+  header_html.replace("%HOSTNAME%", String(host_name));
+  header_html.replace("%PORT%", String(port_str)); // port_str ist bereits ein char array
+  header_html.replace("%LOCALIP%", WiFi.localIP().toString());
+  header_html.replace("%DNSIP%", WiFi.dnsIP().toString());
+  header_html.replace("%EXTIP%", externalIP()); // externalIP() gibt bereits einen String zurück
+  header_html.replace("%MAC%", WiFi.macAddress());
+
+  server->sendContent(header_html); // Sendet den zusammengebauten Header
 }
 
 //+=============================================================================
-// Send footer HTML
+// Send footer HTML (using PROGMEM)
 //
 void sendFooter() {
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime; EPOCH " + String(now() - (timeZone * SECS_PER_HOUR)) + "</em> / <em id='jepoch'></em> ( <em id='jdiff'></em> )</div></div>\n");
-  server->sendContent("      <script>document.getElementById('jepoch').innerHTML = Math.round((new Date()).getTime() / 1000)</script>");
-  server->sendContent("      <script>document.getElementById('jdiff').innerHTML = Math.abs(Math.round((new Date()).getTime() / 1000) - " + String(now() - (timeZone * SECS_PER_HOUR)) + ")</script>");
-  if (strlen(user_id) != 0)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Device secured with SHA256 authentication. Only commands sent and verified with Amazon Alexa and the IR Controller Skill will be processed</em></div></div>");
-  if (authError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last authentication failed because HMAC signatures did not match, see serial output for debugging details</em></div></div>");
-  if (timeAuthError > 0)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last authentication failed because your timestamps are out of sync, see serial output for debugging details. Timediff: " + String(timeAuthError) + "</em></div></div>");
-  if (externalIPError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - unable to retrieve external IP address, this may be due to bad network settings.</em></div></div>");
-  time_t timenow = now() - (timeZone * SECS_PER_HOUR);
-  if (!validEPOCH(timenow))
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - EPOCH time is inappropriately low, likely connection to external time server has failed, check your network settings</em></div></div>");
-  if (userIDError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - your userID is in the wrong format and authentication will not work</em></div></div>");
-  if (ntpError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last attempt to connect to the NTP server failed, check NTP settings and networking settings</em></div></div>");
-  server->sendContent("    </div>\n");
-  server->sendContent("  </body>\n");
-  server->sendContent("</html>\n");
-  server->client().stop();
+  // Basis-Footer mit Uptime/Epoch senden
+  String footer_base_html = FPSTR(HTML_FOOTER_BASE);
+  long current_epoch = now() - (timeZone * SECS_PER_HOUR); // Berechne Epoch nur einmal
+  footer_base_html.replace("%UPTIME%", String(millis()));
+  footer_base_html.replace("%EPOCH%", String(current_epoch));
+  server->sendContent(footer_base_html);
+
+  // Bedingte Fehlermeldungen direkt aus PROGMEM senden
+  if (strlen(user_id) != 0) server->sendContent_P(FOOTER_MSG_SECURED);
+  if (authError) server->sendContent_P(FOOTER_MSG_AUTH_ERR);
+  if (timeAuthError > 0) {
+      String time_err_msg = FPSTR(FOOTER_MSG_TIME_ERR);
+      time_err_msg.replace("%TIMEDIFF%", String(timeAuthError));
+      server->sendContent(time_err_msg);
+  }
+  if (externalIPError) server->sendContent_P(FOOTER_MSG_EXTIP_ERR);
+  time_t timenow = current_epoch; // Verwende die bereits berechnete Zeit
+  if (!validEPOCH(timenow)) server->sendContent_P(FOOTER_MSG_EPOCH_ERR);
+  if (userIDError) server->sendContent_P(FOOTER_MSG_UID_ERR);
+  if (ntpError) server->sendContent_P(FOOTER_MSG_NTP_ERR);
+
+  // Schließende HTML-Tags senden
+  server->sendContent_P(HTML_FOOTER_END);
+
+  server->client().stop(); // Verbindung schließen
 }
+
 
 //+=============================================================================
 // Stream home page HTML
@@ -1842,15 +2393,84 @@ void sendHomePage(String message, String header, int type, int httpcode) {
   server->sendContent("      </div><hr />\n");
   // +++ ENDE FERNBEDIENUNGS-BUTTONS +++
 
+  // +++ MAKRO-BUTTONS ANZEIGEN +++
+  server->sendContent("      <div class='row'>\n");
+  server->sendContent("        <div class='col-md-12'>\n");
+  server->sendContent("          <h3>Macro Buttons</h3>\n");
+  server->sendContent("          <div id='macro-buttons' class='text-center'>\n"); // Container für Makro-Buttons
+
+  bool anyMacroConfigured = false;
+  for (int i = 0; i < MAX_MACROS; ++i) {
+    if (macroConfigs[i].configured) {
+      anyMacroConfigured = true;
+      server->sendContent("            <button class='btn btn-info btn-lg macro-button' style='margin: 5px;' ");
+      // Speichere die *gesamte* JSON-Definition im data-Attribut.
+      // Wichtig: Anführungszeichen im JSON könnten Probleme machen, wenn sie nicht korrekt escaped werden.
+      // Standard-JSON sollte aber ok sein. Alternativ Base64-Kodierung verwenden.
+      server->sendContent("data-json='" + macroConfigs[i].jsonDefinition + "'>"); // JSON hier speichern!
+      server->sendContent(String(macroConfigs[i].name)); // Button-Beschriftung
+      server->sendContent("</button>\n");
+    }
+  }
+
+  if (!anyMacroConfigured) {
+      server->sendContent("            <p><em>No macro buttons configured yet.</em></p>\n");
+  }
+
+  server->sendContent("            <a href='/macros' class='btn btn-default' style='margin: 5px;'>Configure Macros</a>\n"); // Link zur Makro-Konfigurationsseite
+  server->sendContent("          </div>\n");
+  server->sendContent("        </div>\n");
+  server->sendContent("      </div><hr />\n");
+  // +++ ENDE MAKRO-BUTTONS +++
+
+// ... (Rest von sendHomePage) ...
+
+// Füge dies zum <script>-Block am Ende von sendHomePage() hinzu (innerhalb des Blocks)
+
+      server->sendContent("        document.getElementById('macro-buttons').addEventListener('click', function(event) {\n");
+      server->sendContent("          if (event.target.classList.contains('macro-button')) {\n");
+      server->sendContent("            event.preventDefault();\n");
+      server->sendContent("            const button = event.target;\n");
+      server->sendContent("            const macroJsonString = button.dataset.json;\n"); // JSON-String aus data-Attribut holen
+      server->sendContent("            if (!macroJsonString) { console.error('Macro JSON definition not found on button.'); return; }\n");
+      server->sendContent("            console.log('Sending Macro JSON:', macroJsonString);\n");
+      // Visuelles Feedback
+      server->sendContent("            button.classList.add('btn-warning'); \n");
+      server->sendContent("            setTimeout(() => { button.classList.remove('btn-warning'); }, 800); // Länger für Makros\n");
+
+      server->sendContent("            fetch('/sendmacro', {\n");
+      server->sendContent("              method: 'POST',\n");
+      server->sendContent("              headers: {\n");
+      server->sendContent("                'Content-Type': 'application/json'\n");
+      // Optional: Auth Header
+      server->sendContent("              },\n");
+      // Sende ein Objekt, das die JSON-Definition als String enthält
+      server->sendContent("              body: JSON.stringify({ jsonDefinition: macroJsonString })\n");
+      server->sendContent("            })\n");
+      server->sendContent("            .then(response => {\n");
+      server->sendContent("              if (!response.ok) { console.error('Error sending macro command'); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1500); }\n");
+      server->sendContent("              else { button.classList.add('btn-success'); setTimeout(() => { button.classList.remove('btn-success'); }, 800); } // Erfolg anzeigen\n");
+      server->sendContent("              return response.text();\n");
+      server->sendContent("            })\n");
+      server->sendContent("            .then(data => console.log('Server response (macro):', data))\n");
+      server->sendContent("            .catch(error => { console.error('Fetch error (macro):', error); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1500); });\n");
+      server->sendContent("          }\n");
+      server->sendContent("        });\n");
+
+
     // +++ NEU: Feedback vom Formular anzeigen +++
     if (server->hasArg("status")) {
       String status = server->arg("status");
       if (status == "success") {
         server->sendContent("      <div class='row'><div class='col-md-12'><div class='alert alert-success'><strong>Success!</strong> IR code sent via form.</div></div></div>\n");
       } else if (status == "error_missing_args") {
-        server->sendContent("      <div class='row'><div class='col-md-12'><div class='alert alert-danger'><strong>Error!</strong> Missing required form fields (type, data, length).</div></div></div>\n");
+        // ...
       } else if (status == "error_invalid_args") {
-        server->sendContent("      <div class='row'><div class='col-md-12'><div class='alert alert-danger'><strong>Error!</strong> Invalid form data (e.g., length 0 or empty data).</div></div></div>\n");
+        // ...
+      } else if (status == "buttons_saved") { // Status für Buttons
+         server->sendContent("      <div class='row'><div class='col-md-12'><div class='alert alert-success'><strong>Success!</strong> Button configuration saved.</div></div></div>\n");
+      } else if (status == "macros_saved") { // NEUER Status für Makros
+         server->sendContent("      <div class='row'><div class='col-md-12'><div class='alert alert-success'><strong>Success!</strong> Macro configuration saved.</div></div></div>\n");
       }
        // Weitere Statusmeldungen nach Bedarf hinzufügen...
     }
@@ -1944,25 +2564,18 @@ server->sendContent("            <div class='form-group'>\n");
 server->sendContent("              <label for='type' class='col-sm-2 control-label'>Type</label>\n");
 server->sendContent("              <div class='col-sm-10'>\n");
 server->sendContent("                <select class='form-control' id='type' name='type'>\n");
-// --- KORREKTUR: String(...) verwenden, um Verkettung zu ermöglichen ---
-server->sendContent(String("                  <option value='nec'") + addSelected("nec") + ">NEC</option>\n");
-server->sendContent(String("                  <option value='sony'") + addSelected("sony") + ">SONY</option>\n");
-server->sendContent(String("                  <option value='rc5'") + addSelected("rc5") + ">RC5</option>\n");
-server->sendContent(String("                  <option value='rc6'") + addSelected("rc6") + ">RC6</option>\n");
-server->sendContent(String("                  <option value='panasonic'") + addSelected("panasonic") + ">PANASONIC</option>\n");
-server->sendContent(String("                  <option value='lg'") + addSelected("lg") + ">LG</option>\n");
-server->sendContent(String("                  <option value='jvc'") + addSelected("jvc") + ">JVC</option>\n");
-server->sendContent(String("                  <option value='samsung'") + addSelected("samsung") + ">SAMSUNG</option>\n");
-server->sendContent(String("                  <option value='whynter'") + addSelected("whynter") + ">WHYNTER</option>\n");
-server->sendContent(String("                  <option value='coolix'") + addSelected("coolix") + ">COOLIX</option>\n");
-server->sendContent(String("                  <option value='denon'") + addSelected("denon") + ">DENON</option>\n");
-server->sendContent(String("                  <option value='sharp'") + addSelected("sharp") + ">SHARP</option>\n");
-server->sendContent(String("                  <option value='sharpraw'") + addSelected("sharpraw") + ">SHARPRAW</option>\n");
-server->sendContent(String("                  <option value='dish'") + addSelected("dish") + ">DISH</option>\n");
-server->sendContent(String("                  <option value='gree'") + addSelected("gree") + ">GREE</option>\n");
-server->sendContent(String("                  <option value='lutron'") + addSelected("lutron") + ">LUTRON</option>\n");
-server->sendContent(String("                  <option value='roomba'") + addSelected("roomba") + ">ROOMBA</option>\n");
-server->sendContent(String("                  <option value='ecoclim'") + addSelected("ecoclim") + ">ECOCLIM</option>\n");
+// --- Loop using PROGMEM ---
+for (int i = 0; i < NUM_IR_TYPES; ++i) {
+  String value = FPSTR(pgm_read_ptr(&IR_TYPES[i].value));
+  String name = FPSTR(pgm_read_ptr(&IR_TYPES[i].name));
+  server->sendContent("                  <option value='" + value + "'");
+  // Use the pre-calculated lastEncoding for selection
+  if (value.equalsIgnoreCase(lastEncoding)) {
+      server->sendContent(" selected");
+  }
+  server->sendContent(">" + name + "</option>\n");
+}
+// --- End Loop ---
 // Füge hier weitere Typen hinzu, falls nötig. Stelle sicher, dass der 'value' mit dem in last_send.encoding gespeicherten String übereinstimmt.
 server->sendContent("                </select>\n");
 server->sendContent("              </div>\n");
@@ -2035,46 +2648,11 @@ server->sendContent("      </div><hr />\n"); // Trennlinie vor den Pin-Infos
   server->sendContent("        </div>\n");
   server->sendContent("      </div>\n");
 
-      // +++ JAVASCRIPT FÜR REMOTE BUTTONS (am Ende vor sendFooter()) +++
-      server->sendContent("      <script>\n");
-      server->sendContent("        document.getElementById('remote-buttons').addEventListener('click', function(event) {\n");
-      server->sendContent("          if (event.target.classList.contains('remote-button')) {\n");
-      server->sendContent("            event.preventDefault();\n");
-      server->sendContent("            const button = event.target;\n");
-      server->sendContent("            const irData = {\n");
-      server->sendContent("              type: button.dataset.type,\n");
-      server->sendContent("              data: button.dataset.data,\n");
-      server->sendContent("              length: parseInt(button.dataset.length, 10),\n");
-      server->sendContent("              address: button.dataset.address,\n");
-      server->sendContent("              repeat: parseInt(button.dataset.repeat, 10),\n");
-      server->sendContent("              out: parseInt(button.dataset.out, 10)\n");
-      server->sendContent("            };\n");
-      server->sendContent("            console.log('Sending IR:', irData);\n");
-      // Visuelles Feedback (optional)
-      server->sendContent("            button.classList.add('btn-warning'); \n");
-      server->sendContent("            setTimeout(() => { button.classList.remove('btn-warning'); }, 500);\n");
-    
-      server->sendContent("            fetch('/sendbutton', {\n");
-      server->sendContent("              method: 'POST',\n");
-      server->sendContent("              headers: {\n");
-      server->sendContent("                'Content-Type': 'application/json'\n");
-      // Optional: Wenn Passcode/Auth benötigt wird, hier hinzufügen
-      // server->sendContent("                'Authorization': 'Bearer your_token_or_passcode'\n");
-      server->sendContent("              },\n");
-      server->sendContent("              body: JSON.stringify(irData)\n");
-      server->sendContent("            })\n");
-      server->sendContent("            .then(response => {\n");
-      server->sendContent("              if (!response.ok) { console.error('Error sending IR command'); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); }\n");
-      server->sendContent("              return response.text();\n");
-      server->sendContent("            })\n");
-      server->sendContent("            .then(data => console.log('Server response:', data))\n");
-      server->sendContent("            .catch(error => { console.error('Fetch error:', error); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); });\n");
-      server->sendContent("          }\n");
-      server->sendContent("        });\n");
-      server->sendContent("      </script>\n");
-      // +++ ENDE JAVASCRIPT +++
+  // --- JAVASCRIPT FÜR BUTTONS (AUS PROGMEM) ---
+  server->sendContent_P(JS_REMOTE_BUTTONS); // Sendet Remote-Button JS aus PROGMEM
+  server->sendContent_P(JS_MACRO_BUTTONS);  // Sendet Makro-Button JS aus PROGMEM
+  // --- ENDE JAVASCRIPT ---
   
-      
   sendFooter();
 }
 
