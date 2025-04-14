@@ -136,11 +136,140 @@ Code last_send_4;
 Code last_send_5;
 
 //+=============================================================================
+// Button Configuration
+//+=============================================================================
+const int MAX_BUTTONS = 9; // Maximale Anzahl an Buttons
+
+struct ButtonConfig {
+  char name[32] = "";      // Name des Buttons
+  char type[14] = "";      // IR Protokoll (nec, sony, etc.)
+  char data[40] = "";      // IR Daten (Hex String)
+  int length = 0;          // Anzahl Bits
+  char address[20] = "";   // Adresse (Hex String, optional)
+  int repeat = 1;          // Wiederholungen
+  int out = 1;             // Output Pin (1-4)
+  bool configured = false; // Ist dieser Button-Slot konfiguriert?
+};
+
+ButtonConfig buttonConfigs[MAX_BUTTONS]; // Array für Button-Konfigurationen
+//+=============================================================================
+
+
+//+=============================================================================
 // Callback notifying us of the need to save config
 //
 void saveConfigCallback () {
   Serial.println("Should save config");
   shouldSaveConfig = true;
+}
+
+
+//+=============================================================================
+// Load Button Configuration from LittleFS
+//
+void loadButtonConfig() {
+  if (!LittleFS.begin()) {
+    Serial.println("Failed to mount LittleFS for button config loading.");
+    return;
+  }
+
+  if (LittleFS.exists("/buttons.json")) {
+    Serial.println("Reading button config file");
+    File configFile = LittleFS.open("/buttons.json", "r");
+    if (configFile) {
+      DynamicJsonDocument jsonDoc(2048); // Größe ggf. anpassen (9 Buttons * ~150 Zeichen)
+      DeserializationError error = deserializeJson(jsonDoc, configFile);
+      configFile.close(); // Datei schließen, sobald gelesen
+
+      if (!error) {
+        JsonArray buttonArray = jsonDoc.as<JsonArray>();
+        int count = 0;
+        for (JsonObject buttonJson : buttonArray) {
+          if (count >= MAX_BUTTONS) break; // Nicht mehr laden als Plätze vorhanden
+
+          strncpy(buttonConfigs[count].name, buttonJson["name"] | "", sizeof(buttonConfigs[count].name) - 1);
+          strncpy(buttonConfigs[count].type, buttonJson["type"] | "", sizeof(buttonConfigs[count].type) - 1);
+          strncpy(buttonConfigs[count].data, buttonJson["data"] | "", sizeof(buttonConfigs[count].data) - 1);
+          buttonConfigs[count].length = buttonJson["length"] | 0;
+          strncpy(buttonConfigs[count].address, buttonJson["address"] | "", sizeof(buttonConfigs[count].address) - 1);
+          buttonConfigs[count].repeat = buttonJson["repeat"] | 1;
+          buttonConfigs[count].out = buttonJson["out"] | 1;
+          buttonConfigs[count].configured = buttonJson["configured"] | false;
+
+          // Sicherstellen, dass Strings null-terminiert sind
+          buttonConfigs[count].name[sizeof(buttonConfigs[count].name) - 1] = '\0';
+          buttonConfigs[count].type[sizeof(buttonConfigs[count].type) - 1] = '\0';
+          buttonConfigs[count].data[sizeof(buttonConfigs[count].data) - 1] = '\0';
+          buttonConfigs[count].address[sizeof(buttonConfigs[count].address) - 1] = '\0';
+
+          // Einfache Validierung: Wenn Name oder Daten fehlen, ist er nicht konfiguriert
+          if (strlen(buttonConfigs[count].name) == 0 || strlen(buttonConfigs[count].data) == 0 || buttonConfigs[count].length == 0) {
+             buttonConfigs[count].configured = false;
+          }
+
+          count++;
+        }
+        Serial.println("Button config loaded successfully.");
+      } else {
+        Serial.print("Failed to parse buttons.json: ");
+        Serial.println(error.c_str());
+        // Bei Fehler: Alle Buttons als nicht konfiguriert markieren
+        for(int i=0; i<MAX_BUTTONS; ++i) buttonConfigs[i].configured = false;
+      }
+    } else {
+      Serial.println("Failed to open buttons.json for reading.");
+    }
+  } else {
+    Serial.println("buttons.json not found. Initializing with defaults.");
+    // Datei existiert nicht, alle als nicht konfiguriert belassen
+    for(int i=0; i<MAX_BUTTONS; ++i) buttonConfigs[i].configured = false;
+  }
+  // LittleFS.end(); // Nicht hier beenden, wird evtl. noch gebraucht
+}
+
+//+=============================================================================
+// Save Button Configuration to LittleFS
+//
+void saveButtonConfig() {
+  if (!LittleFS.begin()) {
+    Serial.println("Failed to mount LittleFS for button config saving.");
+    return;
+  }
+
+  DynamicJsonDocument jsonDoc(2048); // Größe ggf. anpassen
+  JsonArray buttonArray = jsonDoc.to<JsonArray>();
+
+  for (int i = 0; i < MAX_BUTTONS; ++i) {
+    JsonObject buttonJson = buttonArray.createNestedObject();
+    // Nur speichern, wenn konfiguriert (oder zumindest Name gesetzt ist)
+    if (buttonConfigs[i].configured && strlen(buttonConfigs[i].name) > 0) {
+        buttonJson["name"] = buttonConfigs[i].name;
+        buttonJson["type"] = buttonConfigs[i].type;
+        buttonJson["data"] = buttonConfigs[i].data;
+        buttonJson["length"] = buttonConfigs[i].length;
+        buttonJson["address"] = buttonConfigs[i].address;
+        buttonJson["repeat"] = buttonConfigs[i].repeat;
+        buttonJson["out"] = buttonConfigs[i].out;
+        buttonJson["configured"] = true;
+    } else {
+        // Leeren Eintrag speichern, um die Position zu markieren
+        buttonJson["configured"] = false;
+    }
+  }
+
+  File configFile = LittleFS.open("/buttons.json", "w");
+  if (!configFile) {
+    Serial.println("Failed to open buttons.json for writing.");
+    return;
+  }
+
+  if (serializeJson(jsonDoc, configFile) == 0) {
+    Serial.println("Failed to write to buttons.json.");
+  } else {
+    Serial.println("Button config saved successfully.");
+  }
+  configFile.close();
+  // LittleFS.end(); // Nicht hier beenden
 }
 
 
@@ -632,6 +761,282 @@ void sendCorsHeaders() {
 }
 
 //+=============================================================================
+// Handler for Button Configuration Page
+//
+void handleButtonConfigPage() {
+  Serial.println("Connection received endpoint '/buttons' (GET)");
+
+  // --- Security Check (optional) ---
+  // if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) { ... }
+
+  sendHeader(); // Send standard HTML header
+
+  server->sendContent("      <div class='row'>\n");
+  server->sendContent("        <div class='col-md-12'>\n");
+  server->sendContent("          <h2>Configure Remote Buttons</h2>\n");
+  server->sendContent("          <p>Enter the details for each button you want to configure. Leave the 'Name' field empty to disable a button slot.</p>\n");
+  server->sendContent("          <form class='form-horizontal' action='/savebuttons' method='post'>\n");
+
+  // --- Helper Lambdas for Dropdowns (um Code-Duplizierung zu vermeiden) ---
+  auto generateTypeDropdown = [&](const String& selectName, const String& selectedValue) {
+    String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
+    auto addSelected = [&](const String& val) { return val.equalsIgnoreCase(selectedValue) ? " selected" : ""; };
+    // --- KORREKTUR: String(...) verwenden ---
+    html += String("  <option value='nec'") + addSelected("nec") + ">NEC</option>\n";
+    html += String("  <option value='sony'") + addSelected("sony") + ">SONY</option>\n";
+    html += String("  <option value='rc5'") + addSelected("rc5") + ">RC5</option>\n";
+    html += String("  <option value='rc6'") + addSelected("rc6") + ">RC6</option>\n";
+    html += String("  <option value='panasonic'") + addSelected("panasonic") + ">PANASONIC</option>\n";
+    html += String("  <option value='lg'") + addSelected("lg") + ">LG</option>\n";
+    html += String("  <option value='jvc'") + addSelected("jvc") + ">JVC</option>\n";
+    html += String("  <option value='samsung'") + addSelected("samsung") + ">SAMSUNG</option>\n";
+    html += String("  <option value='whynter'") + addSelected("whynter") + ">WHYNTER</option>\n";
+    html += String("  <option value='coolix'") + addSelected("coolix") + ">COOLIX</option>\n";
+    html += String("  <option value='denon'") + addSelected("denon") + ">DENON</option>\n";
+    html += String("  <option value='sharp'") + addSelected("sharp") + ">SHARP</option>\n";
+    html += String("  <option value='sharpraw'") + addSelected("sharpraw") + ">SHARPRAW</option>\n";
+    html += String("  <option value='dish'") + addSelected("dish") + ">DISH</option>\n";
+    html += String("  <option value='gree'") + addSelected("gree") + ">GREE</option>\n";
+    html += String("  <option value='lutron'") + addSelected("lutron") + ">LUTRON</option>\n";
+    html += String("  <option value='roomba'") + addSelected("roomba") + ">ROOMBA</option>\n";
+    html += String("  <option value='ecoclim'") + addSelected("ecoclim") + ">ECOCLIM</option>\n";
+    // Füge hier weitere Typen hinzu, falls nötig.
+    html += "</select>\n";
+    return html;
+  };
+
+  auto generateOutDropdown = [&](const String& selectName, int selectedValue) {
+      String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
+      auto addOutSelected = [&](int val) { return (val == selectedValue) ? " selected" : ""; };
+      
+      // --- KORREKTUR: String(...) verwenden ---
+      html += String("  <option value='1'") + addOutSelected(1) + ">1 (GPIO " + String(pins1) + ")</option>\n";
+      html += String("  <option value='2'") + addOutSelected(2) + ">2 (GPIO " + String(pins2) + ")</option>\n";
+      html += String("  <option value='3'") + addOutSelected(3) + ">3 (GPIO " + String(pins3) + ")</option>\n";
+      html += String("  <option value='4'") + addOutSelected(4) + ">4 (GPIO " + String(pins4) + ")</option>\n";
+      html += "</select>\n";
+      return html;
+  };
+  // --- Ende Helper Lambdas ---
+
+
+  for (int i = 0; i < MAX_BUTTONS; ++i) {
+    String prefix = "btn" + String(i) + "_"; // Prefix für Feldnamen
+
+    server->sendContent("            <hr><h4>Button " + String(i + 1) + "</h4>\n");
+
+    // Name
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label (e.g., TV Power)' value='" + String(buttonConfigs[i].name) + "'></div>\n");
+    server->sendContent("            </div>\n");
+
+    // Type (Dropdown)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
+    server->sendContent("              <div class='col-sm-10'>" + generateTypeDropdown(prefix + "type", String(buttonConfigs[i].type)) + "</div>\n");
+    server->sendContent("            </div>\n");
+
+    // Data (Hex)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='" + prefix + "data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "data' name='" + prefix + "data' placeholder='e.g., FF02FD' value='" + String(buttonConfigs[i].data) + "'></div>\n");
+    server->sendContent("            </div>\n");
+
+    // Length (Bits)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='" + prefix + "length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "length' name='" + prefix + "length' placeholder='e.g., 32' value='" + String(buttonConfigs[i].length) + "'></div>\n");
+    server->sendContent("            </div>\n");
+
+    // Address (Hex, optional)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='" + prefix + "address' class='col-sm-2 control-label'>Address (Hex, opt.)</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "address' name='" + prefix + "address' placeholder='e.g., 0x404' value='" + String(buttonConfigs[i].address) + "'></div>\n");
+    server->sendContent("            </div>\n");
+
+    // Repeat
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='" + prefix + "repeat' class='col-sm-2 control-label'>Repeat</label>\n");
+    server->sendContent("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "repeat' name='" + prefix + "repeat' value='" + String(buttonConfigs[i].repeat) + "' min='1'></div>\n");
+    server->sendContent("            </div>\n");
+
+    // Output Pin (Dropdown)
+    server->sendContent("            <div class='form-group'>\n");
+    server->sendContent("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
+    server->sendContent("              <div class='col-sm-10'>" + generateOutDropdown(prefix + "out", buttonConfigs[i].out) + "</div>\n");
+    server->sendContent("            </div>\n");
+  }
+
+  // Submit Button
+  server->sendContent("            <hr><div class='form-group'>\n");
+  server->sendContent("              <div class='col-sm-offset-2 col-sm-10'>\n");
+  server->sendContent("                <button type='submit' class='btn btn-success'>Save Button Configuration</button>\n");
+  server->sendContent("                <a href='/' class='btn btn-default'>Cancel</a>\n");
+  server->sendContent("              </div>\n");
+  server->sendContent("            </div>\n");
+
+  server->sendContent("          </form>\n");
+  server->sendContent("        </div>\n");
+  server->sendContent("      </div>\n");
+
+  sendFooter(); // Send standard HTML footer
+}
+
+
+//+=============================================================================
+// Handler to Save Button Configuration
+//
+void handleSaveButtons() {
+  Serial.println("Connection received endpoint '/savebuttons' (POST)");
+
+  // --- Security Check (optional) ---
+  // if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) { ... }
+
+  bool changed = false;
+  for (int i = 0; i < MAX_BUTTONS; ++i) {
+    String prefix = "btn" + String(i) + "_";
+
+    String name = server->arg(prefix + "name");
+    String type = server->arg(prefix + "type");
+    String data = server->arg(prefix + "data");
+    int length = server->arg(prefix + "length").toInt();
+    String address = server->arg(prefix + "address");
+    int repeat = server->arg(prefix + "repeat").toInt();
+    int out = server->arg(prefix + "out").toInt();
+
+    // Trim whitespace from name
+    name.trim();
+
+    // Grundlegende Validierung: Button ist konfiguriert, wenn Name, Daten und Länge vorhanden sind
+    bool isConfigured = (name.length() > 0 && data.length() > 0 && length > 0);
+
+    // Nur aktualisieren, wenn sich etwas geändert hat oder der Status sich ändert
+    if (isConfigured != buttonConfigs[i].configured ||
+        (isConfigured && (
+          name != buttonConfigs[i].name || type != buttonConfigs[i].type || data != buttonConfigs[i].data ||
+          length != buttonConfigs[i].length || address != buttonConfigs[i].address ||
+          repeat != buttonConfigs[i].repeat || out != buttonConfigs[i].out)))
+    {
+        changed = true;
+        strncpy(buttonConfigs[i].name, name.c_str(), sizeof(buttonConfigs[i].name) - 1);
+        buttonConfigs[i].name[sizeof(buttonConfigs[i].name) - 1] = '\0'; // Null-terminieren
+
+        if (isConfigured) {
+            strncpy(buttonConfigs[i].type, type.c_str(), sizeof(buttonConfigs[i].type) - 1);
+            strncpy(buttonConfigs[i].data, data.c_str(), sizeof(buttonConfigs[i].data) - 1);
+            buttonConfigs[i].length = length;
+            strncpy(buttonConfigs[i].address, address.c_str(), sizeof(buttonConfigs[i].address) - 1);
+            buttonConfigs[i].repeat = (repeat > 0) ? repeat : 1;
+            buttonConfigs[i].out = (out >= 1 && out <= 4) ? out : 1;
+            buttonConfigs[i].configured = true;
+
+            // Sicherstellen, dass Strings null-terminiert sind
+            buttonConfigs[i].type[sizeof(buttonConfigs[i].type) - 1] = '\0';
+            buttonConfigs[i].data[sizeof(buttonConfigs[i].data) - 1] = '\0';
+            buttonConfigs[i].address[sizeof(buttonConfigs[i].address) - 1] = '\0';
+
+        } else {
+            // Button deaktivieren/leeren
+            buttonConfigs[i].name[0] = '\0';
+            buttonConfigs[i].type[0] = '\0';
+            buttonConfigs[i].data[0] = '\0';
+            buttonConfigs[i].length = 0;
+            buttonConfigs[i].address[0] = '\0';
+            buttonConfigs[i].repeat = 1;
+            buttonConfigs[i].out = 1;
+            buttonConfigs[i].configured = false;
+        }
+    }
+  }
+
+  if (changed) {
+    Serial.println("Button configuration changed, saving...");
+    saveButtonConfig();
+  } else {
+    Serial.println("No changes detected in button configuration.");
+  }
+
+  // Redirect back to home page after saving
+  server->sendHeader("Location", "/?status=buttons_saved"); // Optional: Status für Feedback
+  server->send(303); // 303 See Other
+}
+
+
+//+=============================================================================
+// Handler to Send IR Code from a Remote Button (AJAX)
+//
+void handleSendButton() {
+  Serial.println("Connection received endpoint '/sendbutton' (POST)");
+
+  // --- Security Check (optional) ---
+  // if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) { ... }
+
+  // --- Argument Parsing (aus JSON Body) ---
+  if (server->hasArg("plain") == false || server->method() != HTTP_POST) {
+    Serial.println("Invalid request to /sendbutton");
+    server->send(400, "text/plain", "Bad Request: Missing JSON payload or wrong method.");
+    return;
+  }
+
+  String body = server->arg("plain");
+  DynamicJsonDocument jsonDoc(512); // Ausreichend für die Button-Parameter
+  DeserializationError error = deserializeJson(jsonDoc, body);
+
+  if (error) {
+    Serial.print("Failed to parse JSON from /sendbutton: ");
+    Serial.println(error.c_str());
+    server->send(400, "text/plain", "Bad Request: Invalid JSON.");
+    return;
+  }
+
+  // Parameter aus JSON extrahieren
+  String type = jsonDoc["type"] | "";
+  String dataStr = jsonDoc["data"] | "";
+  unsigned int len = jsonDoc["length"] | 0;
+  String addressStr = jsonDoc["address"] | "";
+  int repeat = jsonDoc["repeat"] | 1;
+  int out = jsonDoc["out"] | 1;
+
+  // Adresse parsen (mit optionalem "0x")
+  long address = 0;
+  if (addressStr.length() > 0) {
+      if (addressStr.startsWith("0x")) {
+          address = strtoul(addressStr.c_str(), 0, 0);
+      } else {
+          address = strtoul(("0x" + addressStr).c_str(), 0, 0);
+      }
+  }
+
+  // Default values for delays/pulse (könnten auch aus JSON kommen, wenn nötig)
+  int rdelay = 1000;
+  int pulse = 1;
+  int pdelay = 100;
+
+  // Validate inputs (basic)
+  if (type.length() == 0 || dataStr.length() == 0 || len == 0) {
+      Serial.println("Invalid arguments received via /sendbutton");
+      server->send(400, "text/plain", "Bad Request: Missing or invalid IR parameters.");
+      return;
+  }
+  if (repeat <= 0) repeat = 1;
+  if (out < 1 || out > 4) out = 1;
+
+  // --- Trigger IR Blast ---
+  Serial.println("Calling irblast from button press...");
+  digitalWrite(ledpin, LOW); // Turn LED on during send
+  ticker.attach(0.5, disableLed); // Schedule LED turn off
+
+  // Call the existing irblast function (stelle sicher, dass sie 'out_pin' akzeptiert)
+  irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
+
+  // --- Send Success Response ---
+  sendCorsHeaders(); // Wichtig für AJAX von anderer Domain/Port (falls zutreffend)
+  server->send(200, "text/plain", "OK");
+}
+
+
+//+=============================================================================
 // Handler for the IR sending form
 //
 void handleSendIr() {
@@ -729,6 +1134,8 @@ void setup() {
     return;
 
   Serial.println("WiFi configuration complete");
+
+  loadButtonConfig(); // Lade die Button-Konfigurationen
 
   // Set the hostname
   if (strlen(host_name) > 0) {
@@ -1094,6 +1501,12 @@ void setup() {
     }
   });
 
+    // --- NEUE SERVER-HANDLER REGISTRIEREN ---
+    server->on("/buttons", HTTP_GET, handleButtonConfigPage);
+    server->on("/savebuttons", HTTP_POST, handleSaveButtons);
+    server->on("/sendbutton", HTTP_POST, handleSendButton);
+    // --- ENDE NEUE HANDLER ---
+
   server->begin();
   Serial.println("HTTP Server started on port " + String(port));
 
@@ -1330,7 +1743,7 @@ void sendHeader(int httpcode) {
   server->sendContent("  </head>\n");
   server->sendContent("  <body>\n");
   server->sendContent("    <div class='container'>\n");
-  server->sendContent("      <h1><a href='https://github.com/mdhiggins/ESP8266-HTTP-IR-Blaster'>ESP8266 IR Controller</a></h1>\n");
+  server->sendContent("      <h1><a href='https://github.com/baumrasen/ESP8266-HTTP-IR-Blaster'>Extended ESP32 IR Controller</a></h1>\n");
   server->sendContent("      <div class='row'>\n");
   server->sendContent("        <div class='col-md-12'>\n");
   server->sendContent("          <ul class='nav nav-pills'>\n");
@@ -1395,6 +1808,39 @@ void sendHomePage(String message, String header, int type) {
 void sendHomePage(String message, String header, int type, int httpcode) {
   sendHeader(httpcode);
 
+
+  // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN +++
+  server->sendContent("      <div class='row'>\n");
+  server->sendContent("        <div class='col-md-12'>\n");
+  server->sendContent("          <h3>Remote Buttons</h3>\n");
+  server->sendContent("          <div id='remote-buttons' class='text-center'>\n"); // Container für Buttons
+
+  bool anyButtonConfigured = false;
+  for (int i = 0; i < MAX_BUTTONS; ++i) {
+    if (buttonConfigs[i].configured) {
+      anyButtonConfigured = true;
+      server->sendContent("            <button class='btn btn-primary btn-lg remote-button' style='margin: 5px;' ");
+      // Speichere IR-Daten in data-Attributen
+      server->sendContent("data-type='" + String(buttonConfigs[i].type) + "' ");
+      server->sendContent("data-data='" + String(buttonConfigs[i].data) + "' ");
+      server->sendContent("data-length='" + String(buttonConfigs[i].length) + "' ");
+      server->sendContent("data-address='" + String(buttonConfigs[i].address) + "' ");
+      server->sendContent("data-repeat='" + String(buttonConfigs[i].repeat) + "' ");
+      server->sendContent("data-out='" + String(buttonConfigs[i].out) + "'>");
+      server->sendContent(String(buttonConfigs[i].name)); // Button-Beschriftung
+      server->sendContent("</button>\n");
+    }
+  }
+
+  if (!anyButtonConfigured) {
+      server->sendContent("            <p><em>No remote buttons configured yet.</em></p>\n");
+  }
+
+  server->sendContent("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n"); // Link zur Konfigurationsseite
+  server->sendContent("          </div>\n");
+  server->sendContent("        </div>\n");
+  server->sendContent("      </div><hr />\n");
+  // +++ ENDE FERNBEDIENUNGS-BUTTONS +++
 
     // +++ NEU: Feedback vom Formular anzeigen +++
     if (server->hasArg("status")) {
@@ -1588,6 +2034,47 @@ server->sendContent("      </div><hr />\n"); // Trennlinie vor den Pin-Infos
   server->sendContent("            <li><span class='badge'>GPIO " + String(pins4) + "</span> Transmitter 4 </li></ul>\n");
   server->sendContent("        </div>\n");
   server->sendContent("      </div>\n");
+
+      // +++ JAVASCRIPT FÜR REMOTE BUTTONS (am Ende vor sendFooter()) +++
+      server->sendContent("      <script>\n");
+      server->sendContent("        document.getElementById('remote-buttons').addEventListener('click', function(event) {\n");
+      server->sendContent("          if (event.target.classList.contains('remote-button')) {\n");
+      server->sendContent("            event.preventDefault();\n");
+      server->sendContent("            const button = event.target;\n");
+      server->sendContent("            const irData = {\n");
+      server->sendContent("              type: button.dataset.type,\n");
+      server->sendContent("              data: button.dataset.data,\n");
+      server->sendContent("              length: parseInt(button.dataset.length, 10),\n");
+      server->sendContent("              address: button.dataset.address,\n");
+      server->sendContent("              repeat: parseInt(button.dataset.repeat, 10),\n");
+      server->sendContent("              out: parseInt(button.dataset.out, 10)\n");
+      server->sendContent("            };\n");
+      server->sendContent("            console.log('Sending IR:', irData);\n");
+      // Visuelles Feedback (optional)
+      server->sendContent("            button.classList.add('btn-warning'); \n");
+      server->sendContent("            setTimeout(() => { button.classList.remove('btn-warning'); }, 500);\n");
+    
+      server->sendContent("            fetch('/sendbutton', {\n");
+      server->sendContent("              method: 'POST',\n");
+      server->sendContent("              headers: {\n");
+      server->sendContent("                'Content-Type': 'application/json'\n");
+      // Optional: Wenn Passcode/Auth benötigt wird, hier hinzufügen
+      // server->sendContent("                'Authorization': 'Bearer your_token_or_passcode'\n");
+      server->sendContent("              },\n");
+      server->sendContent("              body: JSON.stringify(irData)\n");
+      server->sendContent("            })\n");
+      server->sendContent("            .then(response => {\n");
+      server->sendContent("              if (!response.ok) { console.error('Error sending IR command'); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); }\n");
+      server->sendContent("              return response.text();\n");
+      server->sendContent("            })\n");
+      server->sendContent("            .then(data => console.log('Server response:', data))\n");
+      server->sendContent("            .catch(error => { console.error('Fetch error:', error); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); });\n");
+      server->sendContent("          }\n");
+      server->sendContent("        });\n");
+      server->sendContent("      </script>\n");
+      // +++ ENDE JAVASCRIPT +++
+  
+      
   sendFooter();
 }
 
@@ -1675,6 +2162,45 @@ void sendCodePage(Code selCode, int httpcode){
   server->sendContent("        </div>\n");
   server->sendContent("     </div>\n");
 
+
+    // +++ JAVASCRIPT FÜR REMOTE BUTTONS (am Ende vor sendFooter()) +++
+    server->sendContent("      <script>\n");
+    server->sendContent("        document.getElementById('remote-buttons').addEventListener('click', function(event) {\n");
+    server->sendContent("          if (event.target.classList.contains('remote-button')) {\n");
+    server->sendContent("            event.preventDefault();\n");
+    server->sendContent("            const button = event.target;\n");
+    server->sendContent("            const irData = {\n");
+    server->sendContent("              type: button.dataset.type,\n");
+    server->sendContent("              data: button.dataset.data,\n");
+    server->sendContent("              length: parseInt(button.dataset.length, 10),\n");
+    server->sendContent("              address: button.dataset.address,\n");
+    server->sendContent("              repeat: parseInt(button.dataset.repeat, 10),\n");
+    server->sendContent("              out: parseInt(button.dataset.out, 10)\n");
+    server->sendContent("            };\n");
+    server->sendContent("            console.log('Sending IR:', irData);\n");
+    // Visuelles Feedback (optional)
+    server->sendContent("            button.classList.add('btn-warning'); \n");
+    server->sendContent("            setTimeout(() => { button.classList.remove('btn-warning'); }, 500);\n");
+  
+    server->sendContent("            fetch('/sendbutton', {\n");
+    server->sendContent("              method: 'POST',\n");
+    server->sendContent("              headers: {\n");
+    server->sendContent("                'Content-Type': 'application/json'\n");
+    // Optional: Wenn Passcode/Auth benötigt wird, hier hinzufügen
+    // server->sendContent("                'Authorization': 'Bearer your_token_or_passcode'\n");
+    server->sendContent("              },\n");
+    server->sendContent("              body: JSON.stringify(irData)\n");
+    server->sendContent("            })\n");
+    server->sendContent("            .then(response => {\n");
+    server->sendContent("              if (!response.ok) { console.error('Error sending IR command'); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); }\n");
+    server->sendContent("              return response.text();\n");
+    server->sendContent("            })\n");
+    server->sendContent("            .then(data => console.log('Server response:', data))\n");
+    server->sendContent("            .catch(error => { console.error('Fetch error:', error); button.classList.add('btn-danger'); setTimeout(() => { button.classList.remove('btn-danger'); }, 1000); });\n");
+    server->sendContent("          }\n");
+    server->sendContent("        });\n");
+    server->sendContent("      </script>\n");
+    // +++ ENDE JAVASCRIPT +++
   
     
   sendFooter();
