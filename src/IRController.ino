@@ -12,8 +12,6 @@
 #include <WebServer.h>
 #include <HTTPClient.h>
 #include <ArduinoOTA.h>
-#include "mbedtls/sha256.h"
-#include "mbedtls/md.h" // Für HMAC
 
 #include <Ticker.h>                                           // For LED status
 #include <TimeLib.h>
@@ -28,8 +26,6 @@ const bool getTime = true;                                     // Set to false t
 const int timeZone = -5;                                       // Timezone (-5 is EST)
 
 const bool enableMDNSServices = true;                          // Use mDNS services, must be enabled for ArduinoOTA
-
-const bool bypassLocalAuth = true;                             // Allow local traffic to bypass HMAC check
 
 const unsigned int captureBufSize = 1024;                      // Size of the IR capture buffer.
 
@@ -60,7 +56,6 @@ int port = 80;
 char passcode[20] = "";
 char host_name[20] = "";
 char port_str[6] = "80";
-char user_id[60] = "";
 
 // Do not modify these values with your own, they are placeholder values that WiFiManager will overwrite
 char static_ip[16] = "10.0.1.10";
@@ -97,10 +92,7 @@ char _ip[16] = "";
 
 unsigned long lastupdate = 0;
 
-bool authError = false;
-time_t timeAuthError = 0;
 bool externalIPError = false;
-bool userIDError = false;
 bool ntpError = false;
 
 class Code {
@@ -325,140 +317,6 @@ String epochToString(time_t timenow) {
   return hourStr + ":" + minuteStr + ":" + secondStr;
 }
 
-//+=============================================================================
-// Valid command request using HMAC
-//
-bool validateHMAC(String epid, String mid, String timestamp, String signature, IPAddress clientIP) {
-    userIDError = false;
-    authError = false;
-    ntpError = false;
-    timeAuthError = 0;
-
-    if (allowLocalBypass(clientIP)) {
-      Serial.println("Bypassing HMAC security as this is a local network request");
-      return true;
-    }
-
-    userIDError = !(validUID(user_id));
-
-    time_t timethen = timestamp.toInt();
-    time_t timenow = now() - (timeZone * SECS_PER_HOUR);
-    time_t timediff = abs(timethen - timenow);
-    if (timediff > 30) {
-      Serial.println("Failed security check, signature is too old");
-      Serial.print("Server: ");
-      Serial.println(timethen);
-      Serial.print("Local: ");
-      Serial.println(timenow);
-      Serial.print("MID: ");
-      Serial.println(mid);
-      timeAuthError = timediff;
-      validEPOCH(timenow);
-      return false;
-    }
-
-    uint8_t hash_output[32]; // SHA256 produces a 32-byte hash
-    String key = String(user_id);
-    String computedSignature = ""; // Initialize to empty
-
-    mbedtls_md_context_t ctx;
-    const mbedtls_md_info_t *md_info;
-
-    mbedtls_md_init(&ctx);
-    md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256); // Specify SHA256
-
-    if (md_info == NULL) {
-        Serial.println("ERROR: mbedtls_md_info_from_type failed");
-        mbedtls_md_free(&ctx);
-        return false; // Indicate failure
-    }
-
-    if (mbedtls_md_setup(&ctx, md_info, 1) != 0) { // 1 indicates HMAC mode
-         Serial.println("ERROR: mbedtls_md_setup failed");
-         mbedtls_md_free(&ctx);
-         return false;
-    }
-
-    if (mbedtls_md_hmac_starts(&ctx, (const unsigned char *)key.c_str(), key.length()) != 0) {
-         Serial.println("ERROR: mbedtls_md_hmac_starts failed");
-         mbedtls_md_free(&ctx);
-         return false;
-    }
-
-    // Update with the message parts in order
-    if (mbedtls_md_hmac_update(&ctx, (const unsigned char *)epid.c_str(), epid.length()) != 0) {
-         Serial.println("ERROR: mbedtls_md_hmac_update (epid) failed");
-         mbedtls_md_free(&ctx);
-         return false;
-    }
-     if (mbedtls_md_hmac_update(&ctx, (const unsigned char *)mid.c_str(), mid.length()) != 0) {
-         Serial.println("ERROR: mbedtls_md_hmac_update (mid) failed");
-         mbedtls_md_free(&ctx);
-         return false;
-    }
-     if (mbedtls_md_hmac_update(&ctx, (const unsigned char *)timestamp.c_str(), timestamp.length()) != 0) {
-         Serial.println("ERROR: mbedtls_md_hmac_update (timestamp) failed");
-         mbedtls_md_free(&ctx);
-         return false;
-    }
-
-    // Finalize the HMAC calculation and get the result
-    if (mbedtls_md_hmac_finish(&ctx, hash_output) != 0) {
-         Serial.println("ERROR: mbedtls_md_hmac_finish failed");
-         mbedtls_md_free(&ctx);
-         return false;
-    }
-
-    // Clean up the mbedtls context
-    mbedtls_md_free(&ctx);
-
-    // Convert the binary hash result to a hexadecimal string
-    computedSignature = bin2hex(hash_output, 32); // Use your existing bin2hex function
-
-
-    if (computedSignature != signature) {
-      Serial.println("Failed security check, signatures do not match");
-      Serial.print("1: ");
-      Serial.println(signature);
-      Serial.print("2: ");
-      Serial.println(computedSignature);
-      Serial.print("MID: ");
-      Serial.println(mid);
-      authError = true;
-      return false;
-    }
-
-    Serial.println("Passed security check");
-    Serial.print("MID: ");
-    Serial.println(mid);
-    return true;
-}
-
-//+=============================================================================
-// Check if client request is coming from a local IP address
-//
-bool isInSubnet(IPAddress address) {
-    Serial.print("Client IP: ");
-    Serial.println(address.toString());
-
-    uint32_t mask = uint32_t(WiFi.subnetMask());
-
-    /*
-    uint32_t net_lower = (uint32_t(WiFi.localIP()) & mask);
-    uint32_t net_upper = (net_lower | (~mask));
-    Serial.println(IPAddress(net_lower).toString());
-    Serial.println(IPAddress(net_upper).toString());
-    */
-
-    return ((uint32_t(address) & mask) == (uint32_t(WiFi.localIP()) & mask));
-}
-
-//+=============================================================================
-// Allow local traffic to bypass security
-//
-bool allowLocalBypass(IPAddress clientIP) {
-  return (bypassLocalAuth && isInSubnet(clientIP));
-}
 
 //+=============================================================================
 // Passcode valid check
@@ -622,7 +480,7 @@ bool setupWifi(bool resetConf) {
   // Reset device if on config portal for greater than 3 minutes
   wifiManager.setConfigPortalTimeout(180);
 
-  if (LittleFS.begin()) {
+  if (LittleFS.begin(true)) {
     Serial.println("mounted file system");
     if (LittleFS.exists("/config.json")) {
       //file exists, reading and loading
@@ -643,7 +501,6 @@ bool setupWifi(bool resetConf) {
 
           if (json.containsKey("hostname")) strncpy(host_name, json["hostname"], 20);
           if (json.containsKey("passcode")) strncpy(passcode, json["passcode"], 20);
-          if (json.containsKey("user_id")) strncpy(user_id, json["user_id"], 60);
           if (json.containsKey("port_str")) {
             strncpy(port_str, json["port_str"], 6);
             port = atoi(json["port_str"]);
@@ -667,8 +524,6 @@ bool setupWifi(bool resetConf) {
   wifiManager.addParameter(&custom_passcode);
   WiFiManagerParameter custom_port("port_str", "Choose a port", port_str, 6);
   wifiManager.addParameter(&custom_port);
-  WiFiManagerParameter custom_userid("user_id", "Enter your Amazon user_id", user_id, 60);
-  wifiManager.addParameter(&custom_userid);
 
   wifiManager.setShowStaticFields(true);
   wifiManager.setShowDnsFields(true);
@@ -701,9 +556,19 @@ bool setupWifi(bool resetConf) {
   strncpy(host_name, custom_hostname.getValue(), 20);
   strncpy(passcode, custom_passcode.getValue(), 20);
   strncpy(port_str, custom_port.getValue(), 6);
-  strncpy(user_id, custom_userid.getValue(), 60);
   port = atoi(port_str);
 
+  // --- NEUE PRÜFUNG ---
+  port = atoi(port_str);
+  if (port <= 0 || port > 65535) { // Prüft auf Fehler bei atoi() oder ungültigen Portbereich
+      Serial.print("Warning: Invalid port '");
+      Serial.print(port_str);
+      Serial.println("' detected. Defaulting to port 80.");
+      port = 80; // Setze auf Standardwert 80
+      strcpy(port_str, "80"); // Korrigiere auch den String für Konsistenz
+  }
+  // --- ENDE NEUE PRÜFUNG ---
+  
   if (server != NULL) {
     delete server;
   }
@@ -725,7 +590,6 @@ WiFi.onEvent(WiFiEvent);
     json["hostname"] = host_name;
     json["passcode"] = passcode;
     json["port_str"] = port_str;
-    json["user_id"] = user_id;
     json["ip"] = WiFi.localIP().toString();
     json["gw"] = WiFi.gatewayIP().toString();
     json["sn"] = WiFi.subnetMask().toString();
@@ -1135,6 +999,23 @@ void setup() {
 
   Serial.println("WiFi configuration complete");
 
+  // --- TEMPORÄRER CODE ZUM FORMATIEREN ---
+  // Diesen Block einkommentieren, EINMAL flashen & laufen lassen,
+  // dann wieder auskommentieren und erneut flashen!
+/* 
+  Serial.println("Attempting to format LittleFS... THIS WILL ERASE ALL SAVED DATA (WiFi, Buttons)!");
+  bool formatted = LittleFS.format();
+  if (formatted) {
+    LittleFS.begin(true);
+    Serial.println("LittleFS formatted successfully.");
+    while(1); // Anhalten
+  } else {
+    Serial.println("!!! LittleFS format failed. Halting. !!!");
+    while(1); // Anhalten, wenn Formatierung fehlschlägt
+  }
+    */
+  // --- ENDE TEMPORÄRER CODE ---
+
   loadButtonConfig(); // Lade die Button-Konfigurationen
 
   // Set the hostname
@@ -1214,15 +1095,7 @@ void setup() {
     String mid = server->arg("mid");
     String timestamp = server->arg("time");
 
-    if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, invalid passcode");
-    } else if (strlen(user_id) != 0 && !validateHMAC(epid, mid, timestamp, signature, server->client().remoteIP())) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, HMAC security authentication failed");
-    } else {
+
       DynamicJsonDocument root(4096);
       DeserializationError error = deserializeJson(root, server->arg("plain"));
       int out = (server->hasArg("out")) ? server->arg("out").toInt() : 1;
@@ -1350,7 +1223,6 @@ void setup() {
 
         root.clear();
       }
-    }
   });
 
   // Setup simple msg server to mirror version 1.0 functionality
@@ -1364,86 +1236,76 @@ void setup() {
     String mid = server->arg("mid");
     String timestamp = server->arg("time");
 
-    if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, invalid passcode");
-    } else if (strlen(user_id) != 0 && !validateHMAC(epid, mid, timestamp, signature, server->client().remoteIP())) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, HMAC security authentication");
-    } else {
-      digitalWrite(ledpin, LOW);
-      ticker.attach(0.5, disableLed);
-      String type = server->arg("type");
-      String data = server->arg("data");
-      String ip = server->arg("ip");
+    digitalWrite(ledpin, LOW);
+    ticker.attach(0.5, disableLed);
+    String type = server->arg("type");
+    String data = server->arg("data");
+    String ip = server->arg("ip");
 
-      // Handle device state limitations
-      if (server->hasArg("device")) {
-        String device = server->arg("device");
-        Serial.println("Device name detected " + device);
-        int state = (server->hasArg("state")) ? server->arg("state").toInt() : 0;
-        if (deviceState.containsKey(device)) {
-          Serial.println("Contains the key!");
-          Serial.println(state);
-          int currentState = deviceState[device];
-          Serial.println(currentState);
-          if (state == currentState) {
-            if (simple) {
-              sendCorsHeaders();
-              server->send(200, "text/html", "Not sending command to " + device + ", already in state " + state);
-            } else {
-              sendHomePage("Not sending command to " + device + ", already in state " + state, "Warning", 2); // 200
-            }
-            Serial.println("Not sending command to " + device + ", already in state " + state);
-            return;
+    // Handle device state limitations
+    if (server->hasArg("device")) {
+      String device = server->arg("device");
+      Serial.println("Device name detected " + device);
+      int state = (server->hasArg("state")) ? server->arg("state").toInt() : 0;
+      if (deviceState.containsKey(device)) {
+        Serial.println("Contains the key!");
+        Serial.println(state);
+        int currentState = deviceState[device];
+        Serial.println(currentState);
+        if (state == currentState) {
+          if (simple) {
+            sendCorsHeaders();
+            server->send(200, "text/html", "Not sending command to " + device + ", already in state " + state);
           } else {
-            Serial.println("Setting device " + device + " to state " + state);
-            deviceState[device] = state;
+            sendHomePage("Not sending command to " + device + ", already in state " + state, "Warning", 2); // 200
           }
+          Serial.println("Not sending command to " + device + ", already in state " + state);
+          return;
         } else {
           Serial.println("Setting device " + device + " to state " + state);
           deviceState[device] = state;
         }
-      }
-
-      int len = server->arg("length").toInt();
-      long address = 0;
-      if (server->hasArg("address")) {
-        String addressString = server->arg("address");
-        address = strtoul(addressString.c_str(), 0, 0);
-      }
-
-      int rdelay = (server->hasArg("rdelay")) ? server->arg("rdelay").toInt() : 1000;
-      int pulse = (server->hasArg("pulse")) ? server->arg("pulse").toInt() : 1;
-      int pdelay = (server->hasArg("pdelay")) ? server->arg("pdelay").toInt() : 100;
-      int repeat = (server->hasArg("repeat")) ? server->arg("repeat").toInt() : 1;
-      int out = (server->hasArg("out")) ? server->arg("out").toInt() : 1;
-      if (server->hasArg("code")) {
-        String code = server->arg("code");
-        char separator = ':';
-        data = getValue(code, separator, 0);
-        type = getValue(code, separator, 1);
-        len = getValue(code, separator, 2).toInt();
-      }
-
-      if (simple) {
-        sendCorsHeaders();
-        server->send(200, "text/html", "Success, code sent");
-      }
-
-      if (type == "roku") {
-        rokuCommand(ip, data, repeat, rdelay);
       } else {
-        // OLD: irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out));
-        // NEW: Pass 'out' as the last argument
-        irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
+        Serial.println("Setting device " + device + " to state " + state);
+        deviceState[device] = state;
       }
+    }
 
-      if (!simple) {
-        sendHomePage("Code Sent", "Success", 1); // 200
-      }
+    int len = server->arg("length").toInt();
+    long address = 0;
+    if (server->hasArg("address")) {
+      String addressString = server->arg("address");
+      address = strtoul(addressString.c_str(), 0, 0);
+    }
+
+    int rdelay = (server->hasArg("rdelay")) ? server->arg("rdelay").toInt() : 1000;
+    int pulse = (server->hasArg("pulse")) ? server->arg("pulse").toInt() : 1;
+    int pdelay = (server->hasArg("pdelay")) ? server->arg("pdelay").toInt() : 100;
+    int repeat = (server->hasArg("repeat")) ? server->arg("repeat").toInt() : 1;
+    int out = (server->hasArg("out")) ? server->arg("out").toInt() : 1;
+    if (server->hasArg("code")) {
+      String code = server->arg("code");
+      char separator = ':';
+      data = getValue(code, separator, 0);
+      type = getValue(code, separator, 1);
+      len = getValue(code, separator, 2).toInt();
+    }
+
+    if (simple) {
+      sendCorsHeaders();
+      server->send(200, "text/html", "Success, code sent");
+    }
+
+    if (type == "roku") {
+      rokuCommand(ip, data, repeat, rdelay);
+    } else {
+      // OLD: irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out));
+      // NEW: Pass 'out' as the last argument
+      irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
+    }
+
+    if (!simple) {
+      sendHomePage("Code Sent", "Success", 1); // 200
     }
   });
 
@@ -1453,32 +1315,23 @@ void setup() {
     String epid = server->arg("epid");
     String mid = server->arg("mid");
     String timestamp = server->arg("time");
-    
-    if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, invalid passcode");
-    } else if (strlen(user_id) != 0 && !validateHMAC(epid, mid, timestamp, signature, server->client().remoteIP())) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, HMAC security authentication");
+  
+    int id = server->arg("id").toInt();
+    String output;
+    if (id == 1 && last_recv.valid) {
+      sendCodePage(last_recv);
+    } else if (id == 2 && last_recv_2.valid) {
+      sendCodePage(last_recv_2);
+    } else if (id == 3 && last_recv_3.valid) {
+      sendCodePage(last_recv_3);
+    } else if (id == 4 && last_recv_4.valid) {
+      sendCodePage(last_recv_4);
+    } else if (id == 5 && last_recv_5.valid) {
+      sendCodePage(last_recv_5);
     } else {
-      int id = server->arg("id").toInt();
-      String output;
-      if (id == 1 && last_recv.valid) {
-        sendCodePage(last_recv);
-      } else if (id == 2 && last_recv_2.valid) {
-        sendCodePage(last_recv_2);
-      } else if (id == 3 && last_recv_3.valid) {
-        sendCodePage(last_recv_3);
-      } else if (id == 4 && last_recv_4.valid) {
-        sendCodePage(last_recv_4);
-      } else if (id == 5 && last_recv_5.valid) {
-        sendCodePage(last_recv_5);
-      } else {
-        sendHomePage("Code does not exist", "Alert", 2, 404); // 404
-      }
+      sendHomePage("Code does not exist", "Alert", 2, 404); // 404
     }
+
   });
 
   server->on("/", []() {
@@ -1488,17 +1341,7 @@ void setup() {
     String mid = server->arg("mid");
     String timestamp = server->arg("time");
     
-    if (!allowLocalBypass(server->client().remoteIP()) && !isPasscodeValid(server->arg("pass"))) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, invalid passcode");
-    } else if (strlen(user_id) != 0 && !validateHMAC(epid, mid, timestamp, signature, server->client().remoteIP())) {
-      Serial.println("Unauthorized access");
-      sendCorsHeaders();
-      server->send(401, "text/plain", "Unauthorized, HMAC security authentication");
-    } else {
-      sendHomePage(); // 200
-    }
+    sendHomePage(); // 200
   });
 
     // --- NEUE SERVER-HANDLER REGISTRIEREN ---
@@ -1522,22 +1365,6 @@ void setup() {
   setSyncInterval(300);
   
   externalIP();
-
-  if (strlen(user_id) > 0) {
-    userIDError = !validUID(user_id);
-    if (!userIDError) {
-      Serial.println("No errors detected with security configuration");
-    }
-
-    // Validation check time
-    time_t timenow = now() - (timeZone * SECS_PER_HOUR);
-    bool validEpoch = validEPOCH(timenow);
-    if (validEpoch) {
-      Serial.println("EPOCH time obtained for security checks");
-    } else {
-      Serial.println("Invalid EPOCH time, security checks may fail if unable to sync with NTP server");
-    }
-  }
 
   irsend1.begin();
   irsend2.begin();
@@ -1769,19 +1596,13 @@ void sendFooter() {
   server->sendContent("      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime; EPOCH " + String(now() - (timeZone * SECS_PER_HOUR)) + "</em> / <em id='jepoch'></em> ( <em id='jdiff'></em> )</div></div>\n");
   server->sendContent("      <script>document.getElementById('jepoch').innerHTML = Math.round((new Date()).getTime() / 1000)</script>");
   server->sendContent("      <script>document.getElementById('jdiff').innerHTML = Math.abs(Math.round((new Date()).getTime() / 1000) - " + String(now() - (timeZone * SECS_PER_HOUR)) + ")</script>");
-  if (strlen(user_id) != 0)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Device secured with SHA256 authentication. Only commands sent and verified with Amazon Alexa and the IR Controller Skill will be processed</em></div></div>");
-  if (authError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last authentication failed because HMAC signatures did not match, see serial output for debugging details</em></div></div>");
-  if (timeAuthError > 0)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last authentication failed because your timestamps are out of sync, see serial output for debugging details. Timediff: " + String(timeAuthError) + "</em></div></div>");
+  
   if (externalIPError)
   server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - unable to retrieve external IP address, this may be due to bad network settings.</em></div></div>");
   time_t timenow = now() - (timeZone * SECS_PER_HOUR);
   if (!validEPOCH(timenow))
   server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - EPOCH time is inappropriately low, likely connection to external time server has failed, check your network settings</em></div></div>");
-  if (userIDError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - your userID is in the wrong format and authentication will not work</em></div></div>");
+  
   if (ntpError)
   server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last attempt to connect to the NTP server failed, check NTP settings and networking settings</em></div></div>");
   server->sendContent("    </div>\n");
