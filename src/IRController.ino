@@ -16,6 +16,7 @@
 #include <TimeLib.h>
 
 #include <LittleFS.h>
+#include "esp_ota_ops.h" // Für esp_ota_get_running_partition()
 
 // User settings are below here
 //+=============================================================================
@@ -1564,19 +1565,151 @@ void sendFooter() {
   server->sendContent("      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime; EPOCH " + String(now() - (timeZone * SECS_PER_HOUR)) + "</em> / <em id='jepoch'></em> ( <em id='jdiff'></em> )</div></div>\n");
   server->sendContent("      <script>document.getElementById('jepoch').innerHTML = Math.round((new Date()).getTime() / 1000)</script>");
   server->sendContent("      <script>document.getElementById('jdiff').innerHTML = Math.abs(Math.round((new Date()).getTime() / 1000) - " + String(now() - (timeZone * SECS_PER_HOUR)) + ")</script>");
-  
+
+  // +++ Speicherbelegung als Tabelle +++
+  server->sendContent("      <div class='row'>\n");
+  server->sendContent("        <div class='col-md-12'>\n");
+  server->sendContent("          <h4>Memory Usage</h4>\n");
+  server->sendContent("          <table class='table table-condensed table-bordered' style='font-size: 0.9em; max-width: 600px;'>\n");
+  server->sendContent("            <thead>\n");
+  // --- KORREKTUR: Spaltenüberschrift angepasst ---
+  server->sendContent("              <tr><th>Type</th><th>Used</th><th>Partition Size</th><th>Usage (%)</th><th>Graph</th></tr>\n");
+  server->sendContent("            </thead>\n");
+  server->sendContent("            <tbody>\n");
+
+  char buffer[60]; // Puffer für formatierte Strings
+  int barWidth = 15; // Breite der Fortschrittsanzeige
+
+  // --- LittleFS ---
+  uint32_t totalBytesFS = 0;
+  uint32_t usedBytesFS = 0;
+  String fsStatus = "OK";
+  if (LittleFS.begin()) {
+      totalBytesFS = LittleFS.totalBytes();
+      usedBytesFS = LittleFS.usedBytes();
+  } else {
+      fsStatus = "Mount Error";
+      Serial.println("Error: LittleFS not mounted when trying to get size info for footer.");
+  }
+
+  server->sendContent("              <tr>\n");
+  server->sendContent("                <td>Filesystem</td>\n");
+  if (totalBytesFS > 0) {
+      float totalKB_fs = totalBytesFS / 1024.0;
+      float usedKB_fs = usedBytesFS / 1024.0;
+      int percentage_fs = (int)(((float)usedBytesFS / totalBytesFS) * 100.0);
+      int filledWidth_fs = (int)(((float)usedBytesFS / totalBytesFS) * barWidth);
+
+      snprintf(buffer, sizeof(buffer), "%.1f KB", usedKB_fs);
+      server->sendContent("                <td>" + String(buffer) + "</td>\n");
+      snprintf(buffer, sizeof(buffer), "%.1f KB", totalKB_fs);
+      server->sendContent("                <td>" + String(buffer) + "</td>\n");
+      server->sendContent("                <td>" + String(percentage_fs) + "%</td>\n");
+
+      String bar_fs = "[";
+      for(int i = 0; i < barWidth; ++i) { bar_fs += (i < filledWidth_fs) ? "=" : "-"; }
+      bar_fs += "]";
+      server->sendContent("                <td><samp>" + bar_fs + "</samp></td>\n"); // <samp> für Monospace-Schrift
+  } else {
+      server->sendContent("                <td colspan='4' class='text-danger'>" + fsStatus + "</td>\n");
+  }
+  server->sendContent("              </tr>\n");
+
+  // --- Flash (Sketch) - ANGEPASST ---
+  uint32_t sketchSize = ESP.getSketchSize();
+  const esp_partition_t* runningPartition = esp_ota_get_running_partition(); // Hole die laufende Partition
+  uint32_t totalSketchPartitionSize = 0; // Initialisieren
+  String flashStatus = "OK";
+
+  if (runningPartition != nullptr) {
+      totalSketchPartitionSize = runningPartition->size; // Größe der laufenden Partition
+  } else {
+      flashStatus = "Partition Error";
+      Serial.println("Error: Could not get running partition info for footer.");
+  }
+
+  server->sendContent("              <tr>\n");
+  // --- KORREKTUR: Label angepasst ---
+  server->sendContent("                <td>Flash (App Partition)</td>\n");
+  if (totalSketchPartitionSize > 0) {
+      float totalKB_flash = totalSketchPartitionSize / 1024.0; // Gesamtgröße der Partition
+      float usedKB_flash = sketchSize / 1024.0; // Genutzte Größe des Sketches
+      // --- KORREKTUR: Prozentrechnung basiert auf Partitionsgröße ---
+      int percentage_flash = (int)(((float)sketchSize / totalSketchPartitionSize) * 100.0);
+      int filledWidth_flash = (int)(((float)sketchSize / totalSketchPartitionSize) * barWidth);
+
+      snprintf(buffer, sizeof(buffer), "%.1f KB", usedKB_flash);
+      server->sendContent("                <td>" + String(buffer) + "</td>\n"); // Used
+      snprintf(buffer, sizeof(buffer), "%.1f KB", totalKB_flash);
+      server->sendContent("                <td>" + String(buffer) + "</td>\n"); // Partition Size
+      server->sendContent("                <td>" + String(percentage_flash) + "%</td>\n"); // Usage %
+
+      String bar_flash = "[";
+      for(int i = 0; i < barWidth; ++i) { bar_flash += (i < filledWidth_flash) ? "=" : "-"; }
+      bar_flash += "]";
+      server->sendContent("                <td><samp>" + bar_flash + "</samp></td>\n");
+  } else {
+      server->sendContent("                <td colspan='4' class='text-danger'>" + flashStatus + "</td>\n");
+  }
+  server->sendContent("              </tr>\n");
+  // --- ENDE Flash (Sketch) ---
+
+
+  // --- Heap (RAM) ---
+  uint32_t totalHeap = ESP.getHeapSize();
+  uint32_t freeHeap = ESP.getFreeHeap();
+  uint32_t usedHeap = totalHeap - freeHeap;
+  uint32_t minFreeHeap = ESP.getMinFreeHeap();
+
+  server->sendContent("              <tr>\n");
+  server->sendContent("                <td>Heap (RAM)</td>\n");
+  if (totalHeap > 0) {
+      float totalKB_heap = totalHeap / 1024.0;
+      float usedKB_heap = usedHeap / 1024.0;
+      float minFreeKB_heap = minFreeHeap / 1024.0; // Min Free ist wichtig!
+      int percentage_heap = (int)(((float)usedHeap / totalHeap) * 100.0);
+      int filledWidth_heap = (int)(((float)usedHeap / totalHeap) * barWidth);
+
+      snprintf(buffer, sizeof(buffer), "%.1f KB", usedKB_heap);
+      server->sendContent("                <td>" + String(buffer) + "</td>\n");
+      snprintf(buffer, sizeof(buffer), "%.1f KB", totalKB_heap);
+      server->sendContent("                <td>" + String(buffer) + "</td>\n");
+      // Zeige Prozentsatz und Min Free
+      snprintf(buffer, sizeof(buffer), "%d%%<br><small>(Min Free: %.1f KB)</small>", percentage_heap, minFreeKB_heap);
+      server->sendContent("                <td>" + String(buffer) + "</td>\n");
+
+      String bar_heap = "[";
+      for(int i = 0; i < barWidth; ++i) { bar_heap += (i < filledWidth_heap) ? "=" : "-"; }
+      bar_heap += "]";
+      server->sendContent("                <td><samp>" + bar_heap + "</samp></td>\n");
+  } else {
+      server->sendContent("                <td colspan='4' class='text-danger'>Unavailable</td>\n");
+  }
+  server->sendContent("              </tr>\n");
+
+  // --- Tabelle beenden ---
+  server->sendContent("            </tbody>\n");
+  server->sendContent("          </table>\n");
+  server->sendContent("        </div>\n");
+  server->sendContent("      </div>\n");
+  // +++ ENDE NEU +++
+
+
+  // --- Bestehende Fehler-/Statusmeldungen (können unter der Tabelle bleiben) ---
   if (externalIPError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - unable to retrieve external IP address, this may be due to bad network settings.</em></div></div>");
+    server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - unable to retrieve external IP address, this may be due to bad network settings.</em></div></div>");
   time_t timenow = now() - (timeZone * SECS_PER_HOUR);
   if (!validEPOCH(timenow))
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - EPOCH time is inappropriately low, likely connection to external time server has failed, check your network settings</em></div></div>");
-  
+    server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - EPOCH time is inappropriately low, likely connection to external time server has failed, check your network settings</em></div></div>");
+
   if (ntpError)
-  server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last attempt to connect to the NTP server failed, check NTP settings and networking settings</em></div></div>");
-  server->sendContent("    </div>\n");
+    server->sendContent("      <div class='row'><div class='col-md-12'><em>Error - last attempt to connect to the NTP server failed, check NTP settings and networking settings</em></div></div>");
+  // --- Ende bestehende Meldungen ---
+
+  server->sendContent("    </div>\n"); // Container div schließen
   server->sendContent("  </body>\n");
   server->sendContent("</html>\n");
-  server->client().stop();
+  server->client().stop(); // Wichtig: Muss am Ende bleiben
 }
 
 //+=============================================================================
