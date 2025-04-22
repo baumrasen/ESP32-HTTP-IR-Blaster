@@ -931,6 +931,9 @@ void handleSaveButton(AsyncWebServerRequest *request) {
 //+=============================================================================
 // Handler for Button Configuration Overview Page (NEU)
 //
+//+=============================================================================
+// Handler for Button Configuration Overview Page (Angepasst für mehr Spalten)
+//
 void handleButtonConfigPage(AsyncWebServerRequest *request) {
   Serial.println("Connection received endpoint '/buttons' (GET)");
 
@@ -950,38 +953,63 @@ void handleButtonConfigPage(AsyncWebServerRequest *request) {
           response->print("<div class='alert alert-success'>Button deleted successfully.</div>");
       } else if (status == "error_invalid_id") {
           response->print("<div class='alert alert-danger'>Error: Invalid button ID specified.</div>");
+      } else if (status == "error_invalid_data") { // Fehler von handleSaveButton
+          response->print("<div class='alert alert-danger'>Error: Invalid data submitted for button.</div>");
+      } else if (status == "error_save") { // Allgemeiner Speicherfehler
+          response->print("<div class='alert alert-danger'>Error: Could not save button configuration.</div>");
+      } else if (status == "error_max_buttons") { // Max Buttons erreicht
+          response->print("<div class='alert alert-warning'>Warning: Maximum number of buttons reached. Could not add new button.</div>");
       }
-      // Weitere Status nach Bedarf
   }
 
-  response->print("          <table class='table table-striped'>\n");
-  response->print("            <thead><tr><th>Name</th><th>Type</th><th>Data</th><th>Actions</th></tr></thead>\n");
+  response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n"); // table-condensed für kompakteren Look
+  // --- KORREKTUR: Tabellenkopf erweitern ---
+  response->print("            <thead><tr><th>Name</th><th>Type</th><th>Data</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Actions</th></tr></thead>\n");
   response->print("            <tbody>\n");
 
   if (!buttonConfigs.empty()) {
     for (size_t i = 0; i < buttonConfigs.size(); ++i) {
       const auto& button = buttonConfigs[i];
       response->print("              <tr>\n");
-      response->print("                <td>" + String(button.name) + "</td>\n");
-      response->print("                <td><code>" + String(button.type) + "</code></td>\n");
-      response->print("                <td><code>" + String(button.data) + " (" + String(button.length) + " bits)</code></td>\n");
+      response->print("                <td>" + String(button.name) + "</td>\n"); // Name
+      response->print("                <td><code>" + String(button.type) + "</code></td>\n"); // Type
+      response->print("                <td><code>" + String(button.data) + "</code></td>\n"); // Data
+
+      // --- NEU: Zusätzliche Spalten ---
+      response->print("                <td><code>" + String(button.length) + "</code></td>\n"); // Length
+      response->print("                <td><code>" + (String(button.address).length() > 0 ? String(button.address) : "-") + "</code></td>\n"); // Address (oder '-')
+      response->print("                <td><code>" + String(button.repeat) + "</code></td>\n"); // Repeat
+
+      // Output Pin mit GPIO Info
+      String outText = String(button.out) + " (";
+        switch(button.out) {
+            case 1: outText += "GPIO " + String(pins1); break;
+            case 2: outText += "GPIO " + String(pins2); break;
+            case 3: outText += "GPIO " + String(pins3); break;
+            case 4: outText += "GPIO " + String(pins4); break;
+            default: outText += "?"; break;
+        }
+        outText += ")";
+      response->print("                <td><code>" + outText + "</code></td>\n"); // Out
+      // --- ENDE NEU ---
+
+      // Actions Spalte
       response->print("                <td>\n");
-      // Edit Link mit ID (Index)
-      response->print("                  <a href='/editbutton?id=" + String(i) + "' class='btn btn-xs btn-warning'>Edit</a>\n");
-      // Delete Link mit ID (Index) und Bestätigung
+      response->print("                  <a href='/editbutton?id=" + String(i) + "' class='btn btn-xs btn-warning' style='margin-right: 3px;'>Edit</a>\n"); // Style für Abstand
       response->print("                  <a href='/deletebutton?id=" + String(i) + "' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure you want to delete button \\'" + String(button.name) + "\\'?\");'>Delete</a>\n");
       response->print("                </td>\n");
       response->print("              </tr>\n");
     }
   } else {
-    response->print("              <tr><td colspan='4' class='text-center'><em>No buttons configured.</em></td></tr>\n");
+    // --- KORREKTUR: colspan an neue Spaltenanzahl anpassen (8) ---
+    response->print("              <tr><td colspan='8' class='text-center'><em>No buttons configured.</em></td></tr>\n");
   }
 
   response->print("            </tbody>\n");
   response->print("          </table>\n");
   // Button zum Hinzufügen eines neuen Buttons
   response->print("          <a href='/addbutton' class='btn btn-success'>Add New Button</a>\n");
-  response->print("          <a href='/' class='btn btn-default' style='margin-left: 10px;'>Back to Home</a>\n"); // Zurück zur Hauptseite
+  response->print("          <a href='/' class='btn btn-default' style='margin-left: 10px;'>Back to Home</a>\n");
   response->print("        </div>\n");
   response->print("      </div>\n");
 
