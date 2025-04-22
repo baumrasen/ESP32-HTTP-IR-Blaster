@@ -134,7 +134,8 @@ struct ButtonConfig {
   bool configured = false; // Ist dieser Button-Slot konfiguriert?
 };
 
-ButtonConfig buttonConfigs[MAX_BUTTONS]; // Array für Button-Konfigurationen
+// ButtonConfig buttonConfigs[MAX_BUTTONS]; // ALT
+std::vector<ButtonConfig> buttonConfigs; // NEU
 //+=============================================================================
 
 
@@ -151,6 +152,8 @@ void saveConfigCallback () {
 // Load Button Configuration from LittleFS
 //
 void loadButtonConfig() {
+  buttonConfigs.clear(); // Vector vor dem Laden leeren
+  
   if (!LittleFS.begin()) {
     Serial.println("Failed to mount LittleFS for button config loading.");
     return;
@@ -168,91 +171,89 @@ void loadButtonConfig() {
         JsonArray buttonArray = jsonDoc.as<JsonArray>();
         int count = 0;
         for (JsonObject buttonJson : buttonArray) {
-          if (count >= MAX_BUTTONS) break; // Nicht mehr laden als Plätze vorhanden
 
-          strncpy(buttonConfigs[count].name, buttonJson["name"] | "", sizeof(buttonConfigs[count].name) - 1);
-          strncpy(buttonConfigs[count].type, buttonJson["type"] | "", sizeof(buttonConfigs[count].type) - 1);
-          strncpy(buttonConfigs[count].data, buttonJson["data"] | "", sizeof(buttonConfigs[count].data) - 1);
-          buttonConfigs[count].length = buttonJson["length"] | 0;
-          strncpy(buttonConfigs[count].address, buttonJson["address"] | "", sizeof(buttonConfigs[count].address) - 1);
-          buttonConfigs[count].repeat = buttonJson["repeat"] | 1;
-          buttonConfigs[count].out = buttonJson["out"] | 1;
-          buttonConfigs[count].configured = buttonJson["configured"] | false;
+          // Optional: Limit prüfen, falls MAX_BUTTONS noch verwendet wird
+          if (buttonConfigs.size() >= MAX_BUTTONS) {
+             Serial.println("Maximum number of buttons reached, ignoring further entries.");
+            break;
+          }
+          
+          ButtonConfig newButton; // Temporäres Objekt erstellen
+
+          strncpy(newButton.name, buttonJson["name"] | "", sizeof(newButton.name) - 1);
+          strncpy(newButton.type, buttonJson["type"] | "", sizeof(newButton.type) - 1);
+          strncpy(newButton.data, buttonJson["data"] | "", sizeof(newButton.data) - 1);
+          newButton.length = buttonJson["length"] | 0;
+          strncpy(newButton.address, buttonJson["address"] | "", sizeof(newButton.address) - 1);
+          newButton.repeat = buttonJson["repeat"] | 1;
+          newButton.out = buttonJson["out"] | 1;
+          newButton.configured = buttonJson["configured"] | false;
 
           // Sicherstellen, dass Strings null-terminiert sind
-          buttonConfigs[count].name[sizeof(buttonConfigs[count].name) - 1] = '\0';
-          buttonConfigs[count].type[sizeof(buttonConfigs[count].type) - 1] = '\0';
-          buttonConfigs[count].data[sizeof(buttonConfigs[count].data) - 1] = '\0';
-          buttonConfigs[count].address[sizeof(buttonConfigs[count].address) - 1] = '\0';
+          newButton.name[sizeof(newButton.name) - 1] = '\0';
+          newButton.type[sizeof(newButton.type) - 1] = '\0';
+          newButton.data[sizeof(newButton.data) - 1] = '\0';
+          newButton.address[sizeof(newButton.address) - 1] = '\0';
 
-          // Einfache Validierung: Wenn Name oder Daten fehlen, ist er nicht konfiguriert
-          if (strlen(buttonConfigs[count].name) == 0 || strlen(buttonConfigs[count].data) == 0 || buttonConfigs[count].length == 0) {
-             buttonConfigs[count].configured = false;
+          // Nur hinzufügen, wenn als konfiguriert markiert UND Name/Daten vorhanden
+          if (newButton.configured && strlen(newButton.name) > 0 && strlen(newButton.data) > 0 && newButton.length > 0) {
+             buttonConfigs.push_back(newButton); // Zum Vector hinzufügen
           }
-
-          count++;
         }
-        Serial.println("Button config loaded successfully.");
+        Serial.printf("Loaded %d buttons successfully.\n", buttonConfigs.size());
       } else {
         Serial.print("Failed to parse buttons.json: ");
         Serial.println(error.c_str());
-        // Bei Fehler: Alle Buttons als nicht konfiguriert markieren
-        for(int i=0; i<MAX_BUTTONS; ++i) buttonConfigs[i].configured = false;
       }
     } else {
       Serial.println("Failed to open buttons.json for reading.");
     }
   } else {
-    Serial.println("buttons.json not found. Initializing with defaults.");
-    // Datei existiert nicht, alle als nicht konfiguriert belassen
-    for(int i=0; i<MAX_BUTTONS; ++i) buttonConfigs[i].configured = false;
+    Serial.println("buttons.json not found. No buttons loaded.");
   }
-  // LittleFS.end(); // Nicht hier beenden, wird evtl. noch gebraucht
 }
 
-//+=============================================================================
-// Save Button Configuration to LittleFS
-//
 void saveButtonConfig() {
+  Serial.println("    ==> saveButtonConfig: Entered function."); // NEU
   if (!LittleFS.begin()) {
-    Serial.println("Failed to mount LittleFS for button config saving.");
+    Serial.println("        ERROR: Failed to mount LittleFS!"); // NEU
     return;
   }
+  Serial.println("        LittleFS mounted."); // NEU
 
-  DynamicJsonDocument jsonDoc(2048); // Größe ggf. anpassen
+  DynamicJsonDocument jsonDoc(4096);
   JsonArray buttonArray = jsonDoc.to<JsonArray>();
 
-  for (int i = 0; i < MAX_BUTTONS; ++i) {
-    JsonObject buttonJson = buttonArray.createNestedObject();
-    // Nur speichern, wenn konfiguriert (oder zumindest Name gesetzt ist)
-    if (buttonConfigs[i].configured && strlen(buttonConfigs[i].name) > 0) {
-        buttonJson["name"] = buttonConfigs[i].name;
-        buttonJson["type"] = buttonConfigs[i].type;
-        buttonJson["data"] = buttonConfigs[i].data;
-        buttonJson["length"] = buttonConfigs[i].length;
-        buttonJson["address"] = buttonConfigs[i].address;
-        buttonJson["repeat"] = buttonConfigs[i].repeat;
-        buttonJson["out"] = buttonConfigs[i].out;
-        buttonJson["configured"] = true;
-    } else {
-        // Leeren Eintrag speichern, um die Position zu markieren
-        buttonJson["configured"] = false;
-    }
+  Serial.printf("        Serializing %d buttons...\n", buttonConfigs.size()); // NEU
+  for (const auto& button : buttonConfigs) {
+     Serial.println("          - Serializing: " + String(button.name)); // NEU (Optional)
+     JsonObject buttonJson = buttonArray.createNestedObject();
+     buttonJson["name"] = button.name;
+    buttonJson["type"] = button.type;
+    buttonJson["data"] = button.data;
+    buttonJson["length"] = button.length;
+    buttonJson["address"] = button.address;
+    buttonJson["repeat"] = button.repeat;
+    buttonJson["out"] = button.out;
+    buttonJson["configured"] = true; // Alle im Vector sind konfiguriert
   }
 
   File configFile = LittleFS.open("/buttons.json", "w");
   if (!configFile) {
-    Serial.println("Failed to open buttons.json for writing.");
+    Serial.println("        ERROR: Failed to open buttons.json for writing!"); // NEU
     return;
   }
+  Serial.println("        buttons.json opened for writing."); // NEU
 
-  if (serializeJson(jsonDoc, configFile) == 0) {
-    Serial.println("Failed to write to buttons.json.");
+  size_t bytesWritten = serializeJson(jsonDoc, configFile); // NEU: Rückgabewert speichern
+  if (bytesWritten == 0) {
+    Serial.println("        ERROR: Failed to write to buttons.json (serializeJson returned 0)."); // NEU
   } else {
-    Serial.println("Button config saved successfully.");
+    Serial.printf("        %d bytes written to buttons.json.\n", bytesWritten); // NEU
+    Serial.println("        Button config saved successfully.");
   }
   configFile.close();
-  // LittleFS.end(); // Nicht hier beenden
+  Serial.println("    <== saveButtonConfig: Leaving function."); // NEU
 }
 
 
@@ -607,114 +608,379 @@ WiFi.onEvent(WiFiEvent);
 }
 
 
-//+=============================================================================
-// Handler for Button Configuration Page
-//
-void handleButtonConfigPage(AsyncWebServerRequest *request) {
-  Serial.println("Connection received endpoint '/buttons' (GET)");
+// Hilfsfunktion zum Generieren des Formulars für einen Button
+void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& buttonData, int buttonId) {
+  String prefix = "btn_"; // Einheitlicher Prefix
+  String actionUrl = "/savebutton";
+  String pageTitle = (buttonId == -1) ? "Add New Button" : "Edit Button: " + String(buttonData.name);
 
-  // --- Security Check (optional) ---
-  // if (!allowLocalBypass(request->client().remoteIP()) && !isPasscodeValid(request->arg("pass"))) { ... }
-
-  // --- Erstelle den Response Stream ---
-  // Wähle den HTTP-Code (hier 200 OK)
-  AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", 200);
-  // --- Schreibe Hauptinhalt in den Stream ---
-  // KORREKTUR: HTML Entities &lt; und &gt; durch < und > ersetzen!
   response->print("      <div class='row'>\n");
   response->print("        <div class='col-md-12'>\n");
-  response->print("          <h2>Configure Remote Buttons</h2>\n");
-  response->print("          <p>Enter the details for each button you want to configure. Leave the 'Name' field empty to disable a button slot.</p>\n");
-  response->print("          <form class='form-horizontal' action='/savebuttons' method='post'>\n");
+  response->print("          <h2>" + pageTitle + "</h2>\n");
+  response->print("          <form class='form-horizontal' action='" + actionUrl + "' method='post'>\n");
+  response->print("            <input type='hidden' name='button_id' value='" + String(buttonId) + "'>\n");
 
-  // --- Helper Lambdas (bleiben gleich, aber verwenden response->print intern) ---
-   auto generateTypeDropdown = [&](const String& selectName, const String& selectedValue) {
-    String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
-    auto addSelected = [&](const String& val) { return val.equalsIgnoreCase(selectedValue) ? " selected" : ""; };
-    html += String("  <option value='nec'") + addSelected("nec") + ">NEC</option>\n";
-    // ... alle anderen Optionen ...
-    html += "</select>\n";
-    return html; // Gibt den HTML-String zurück
+  // --- KORREKTUR: Lambdas HIER implementieren ---
+  auto generateTypeDropdown = [&](const String& selectName, const String& selectedValue) -> String { // Explizit String als Rückgabetyp
+      String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
+      auto addSelected = [&](const String& val) { return val.equalsIgnoreCase(selectedValue) ? " selected" : ""; };
+      html += String("  <option value='nec'") + addSelected("nec") + ">NEC</option>\n";
+      html += String("  <option value='sony'") + addSelected("sony") + ">SONY</option>\n";
+      html += String("  <option value='rc5'") + addSelected("rc5") + ">RC5</option>\n";
+      html += String("  <option value='rc6'") + addSelected("rc6") + ">RC6</option>\n";
+      html += String("  <option value='panasonic'") + addSelected("panasonic") + ">PANASONIC</option>\n";
+      html += String("  <option value='lg'") + addSelected("lg") + ">LG</option>\n";
+      html += String("  <option value='jvc'") + addSelected("jvc") + ">JVC</option>\n";
+      html += String("  <option value='samsung'") + addSelected("samsung") + ">SAMSUNG</option>\n";
+      html += String("  <option value='whynter'") + addSelected("whynter") + ">WHYNTER</option>\n";
+      html += String("  <option value='coolix'") + addSelected("coolix") + ">COOLIX</option>\n";
+      html += String("  <option value='denon'") + addSelected("denon") + ">DENON</option>\n";
+      html += String("  <option value='sharp'") + addSelected("sharp") + ">SHARP</option>\n";
+      html += String("  <option value='sharpraw'") + addSelected("sharpraw") + ">SHARPRAW</option>\n";
+      html += String("  <option value='dish'") + addSelected("dish") + ">DISH</option>\n";
+      html += String("  <option value='gree'") + addSelected("gree") + ">GREE</option>\n";
+      html += String("  <option value='lutron'") + addSelected("lutron") + ">LUTRON</option>\n";
+      html += String("  <option value='roomba'") + addSelected("roomba") + ">ROOMBA</option>\n";
+      html += String("  <option value='ecoclim'") + addSelected("ecoclim") + ">ECOCLIM</option>\n";
+      html += "</select>\n";
+      return html; // WICHTIG: String zurückgeben
   };
 
-  auto generateOutDropdown = [&](const String& selectName, int selectedValue) {
+  auto generateOutDropdown = [&](const String& selectName, int selectedValue) -> String { // Explizit String als Rückgabetyp
       String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
       auto addOutSelected = [&](int val) { return (val == selectedValue) ? " selected" : ""; };
       html += String("  <option value='1'") + addOutSelected(1) + ">1 (GPIO " + String(pins1) + ")</option>\n";
-      // ... alle anderen Optionen ...
+      html += String("  <option value='2'") + addOutSelected(2) + ">2 (GPIO " + String(pins2) + ")</option>\n";
+      html += String("  <option value='3'") + addOutSelected(3) + ">3 (GPIO " + String(pins3) + ")</option>\n";
+      html += String("  <option value='4'") + addOutSelected(4) + ">4 (GPIO " + String(pins4) + ")</option>\n";
       html += "</select>\n";
-      return html; // Gibt den HTML-String zurück
+      return html; // WICHTIG: String zurückgeben
   };
+  // --- ENDE LAMBDA IMPLEMENTIERUNGEN ---
 
-  // --- Schleife für Buttons ---
-  for (int i = 0; i < MAX_BUTTONS; ++i) {
-    String prefix = "btn" + String(i) + "_";
-    response->print("            <hr><h4>Button " + String(i + 1) + "</h4>\n");
+  // --- Formularfelder ---
+  // Name
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n");
+  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label' value='" + String(buttonData.name) + "' required></div>\n");
+  response->print("            </div>\n");
 
-    // Name
-    response->print("            <div class='form-group'>\n");
-    response->print("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n");
-    response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label (e.g., TV Power)' value='" + String(buttonConfigs[i].name) + "'></div>\n");
-    response->print("            </div>\n");
+  // Type
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
+  // KORREKTUR: Lambda aufrufen und Ergebnis verketten
+  response->print("              <div class='col-sm-10'>" + generateTypeDropdown(prefix + "type", String(buttonData.type)) + "</div>\n");
+  response->print("            </div>\n");
 
-    // Type (Dropdown)
-    response->print("            <div class='form-group'>\n");
-    response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
-    // Lambda aufrufen und Ergebnis in den Stream schreiben
-    response->print("              <div class='col-sm-10'>" + generateTypeDropdown(prefix + "type", String(buttonConfigs[i].type)) + "</div>\n");
-    response->print("            </div>\n");
+  // Data
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='" + prefix + "data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
+  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "data' name='" + prefix + "data' placeholder='e.g., FF02FD' value='" + String(buttonData.data) + "' required></div>\n");
+  response->print("            </div>\n");
 
-    // Data (Hex)
-    response->print("            <div class='form-group'>\n");
-    response->print("              <label for='" + prefix + "data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
-    response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "data' name='" + prefix + "data' placeholder='e.g., FF02FD' value='" + String(buttonConfigs[i].data) + "'></div>\n");
-    response->print("            </div>\n");
+  // Length
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='" + prefix + "length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
+  response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "length' name='" + prefix + "length' placeholder='e.g., 32' value='" + String(buttonData.length) + "' required min='1'></div>\n");
+  response->print("            </div>\n");
 
-     // Length (Bits)
-    response->print("            <div class='form-group'>\n");
-    response->print("              <label for='" + prefix + "length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
-    response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "length' name='" + prefix + "length' placeholder='e.g., 32' value='" + String(buttonConfigs[i].length) + "'></div>\n");
-    response->print("            </div>\n");
+  // Address
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='" + prefix + "address' class='col-sm-2 control-label'>Address (Hex, opt.)</label>\n");
+  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "address' name='" + prefix + "address' placeholder='e.g., 0x404' value='" + String(buttonData.address) + "'></div>\n");
+  response->print("            </div>\n");
 
-    // Address (Hex, optional)
-    response->print("            <div class='form-group'>\n");
-    response->print("              <label for='" + prefix + "address' class='col-sm-2 control-label'>Address (Hex, opt.)</label>\n");
-    response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "address' name='" + prefix + "address' placeholder='e.g., 0x404' value='" + String(buttonConfigs[i].address) + "'></div>\n");
-    response->print("            </div>\n");
+  // Repeat
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='" + prefix + "repeat' class='col-sm-2 control-label'>Repeat</label>\n");
+  response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "repeat' name='" + prefix + "repeat' value='" + String(buttonData.repeat) + "' min='1'></div>\n");
+  response->print("            </div>\n");
 
-    // Repeat
-    response->print("            <div class='form-group'>\n");
-    response->print("              <label for='" + prefix + "repeat' class='col-sm-2 control-label'>Repeat</label>\n");
-    response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "repeat' name='" + prefix + "repeat' value='" + String(buttonConfigs[i].repeat) + "' min='1'></div>\n");
-    response->print("            </div>\n");
+  // Output Pin
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
+  // KORREKTUR: Lambda aufrufen und Ergebnis verketten
+  response->print("              <div class='col-sm-10'>" + generateOutDropdown(prefix + "out", buttonData.out) + "</div>\n");
+  response->print("            </div>\n");
 
-    // Output Pin (Dropdown)
-    response->print("            <div class='form-group'>\n");
-    response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
-    // Lambda aufrufen und Ergebnis in den Stream schreiben
-    response->print("              <div class='col-sm-10'>" + generateOutDropdown(prefix + "out", buttonConfigs[i].out) + "</div>\n");
-    response->print("            </div>\n");
-  }
-
-  // Submit Button
-  response->print("            <hr><div class='form-group'>\n");
+  // --- Submit/Cancel Buttons ---
+  response->print("            <div class='form-group'>\n");
   response->print("              <div class='col-sm-offset-2 col-sm-10'>\n");
-  response->print("                <button type='submit' class='btn btn-success'>Save Button Configuration</button>\n");
-  response->print("                <a href='/' class='btn btn-default'>Cancel</a>\n");
+  response->print("                <button type='submit' class='btn btn-success'>Save Button</button>\n");
+  response->print("                <a href='/buttons' class='btn btn-default'>Cancel</a>\n");
   response->print("              </div>\n");
   response->print("            </div>\n");
 
   response->print("          </form>\n");
   response->print("        </div>\n");
   response->print("      </div>\n");
-
-  // --- Schreibe Footer in den Stream ---
-  sendFooter(response); // Übergibt den Stream
-
-  // --- Sende den kompletten Stream ---
-  request->send(response);
 }
 
+
+// Handler zum Anzeigen des "Add New Button"-Formulars
+void handleAddButtonPage(AsyncWebServerRequest *request) {
+Serial.println("Connection received endpoint '/addbutton' (GET)");
+AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", 200);
+sendHeader(response);
+ButtonConfig emptyButton; // Leeres Struct für leeres Formular
+emptyButton.repeat = 1; // Standardwerte setzen
+emptyButton.out = 1;
+generateButtonForm(response, emptyButton, -1); // -1 signalisiert "neu"
+sendFooter(response);
+request->send(response);
+}
+
+// Handler zum Anzeigen des "Edit Button"-Formulars
+void handleEditButtonPage(AsyncWebServerRequest *request) {
+Serial.println("Connection received endpoint '/editbutton' (GET)");
+if (!request->hasParam("id")) {
+  request->redirect("/buttons?status=error_invalid_id");
+  return;
+}
+int buttonId = request->getParam("id")->value().toInt();
+
+// ID validieren (muss innerhalb der Vector-Grenzen liegen)
+if (buttonId < 0 || buttonId >= buttonConfigs.size()) {
+   Serial.printf("Error: Invalid button ID %d requested for edit.\n", buttonId);
+   request->redirect("/buttons?status=error_invalid_id");
+   return;
+}
+
+AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", 200);
+sendHeader(response);
+generateButtonForm(response, buttonConfigs[buttonId], buttonId); // Daten des Buttons übergeben
+sendFooter(response);
+request->send(response);
+}
+
+// Handler zum Löschen eines Buttons
+void handleDeleteButton(AsyncWebServerRequest *request) {
+Serial.println("Connection received endpoint '/deletebutton' (GET)");
+ if (!request->hasParam("id")) {
+  request->redirect("/buttons?status=error_invalid_id");
+  return;
+}
+int buttonId = request->getParam("id")->value().toInt();
+
+// ID validieren
+if (buttonId >= 0 && buttonId < buttonConfigs.size()) {
+  Serial.printf("Deleting button ID %d ('%s').\n", buttonId, buttonConfigs[buttonId].name);
+  buttonConfigs.erase(buttonConfigs.begin() + buttonId); // Element aus Vector löschen
+  saveButtonConfig(); // Änderung speichern
+  request->redirect("/buttons?status=deleted");
+} else {
+  Serial.printf("Error: Invalid button ID %d requested for deletion.\n", buttonId);
+  request->redirect("/buttons?status=error_invalid_id");
+}
+}
+
+void handleSaveButton(AsyncWebServerRequest *request) {
+  Serial.println("==> handleSaveButton: Entered function.");
+
+  // --- NEUER ANSATZ: Parameter manuell per Index suchen ---
+  int params = request->params();
+  Serial.printf("    Scanning %d parameters...\n", params);
+
+  // Lokale Variablen für die gelesenen Werte initialisieren
+  String buttonIdStr = ""; // ID als String lesen
+  String name = "";
+  String type = "";
+  String data = "";
+  String lengthStr = ""; // Länge als String lesen
+  String address = "";
+  String repeatStr = ""; // Repeat als String lesen
+  String outStr = "";    // Out als String lesen
+  bool buttonIdFound = false;
+
+  for(int i=0; i<params; i++){
+    const AsyncWebParameter* p = request->getParam(i);
+    // Nur POST-Parameter berücksichtigen
+    if(p->isPost()){
+      String paramName = p->name(); // Namen holen
+      String paramValue = p->value(); // Wert holen
+      Serial.printf("      POST[%s]: %s\n", paramName.c_str(), paramValue.c_str()); // Debug
+
+      // Werte basierend auf dem Namen zuweisen
+      if (paramName.equals("button_id")) {
+        buttonIdStr = paramValue;
+        buttonIdFound = true;
+      } else if (paramName.equals("btn_name")) {
+        name = paramValue;
+      } else if (paramName.equals("btn_type")) {
+        type = paramValue;
+      } else if (paramName.equals("btn_data")) {
+        data = paramValue;
+      } else if (paramName.equals("btn_length")) {
+        lengthStr = paramValue;
+      } else if (paramName.equals("btn_address")) {
+        address = paramValue;
+      } else if (paramName.equals("btn_repeat")) {
+        repeatStr = paramValue;
+      } else if (paramName.equals("btn_out")) {
+        outStr = paramValue;
+      }
+    } else {
+       Serial.printf("      Ignoring non-POST param[%s]: %s\n", p->name().c_str(), p->value().c_str());
+    }
+  }
+  Serial.println("    Parameter scan complete.");
+  // --- ENDE NEUER ANSATZ ---
+
+  // --- Prüfung, ob button_id gefunden wurde ---
+  if (!buttonIdFound) {
+      Serial.println("    ERROR: Parameter 'button_id' not found during manual scan!");
+      request->redirect("/buttons?status=error_save");
+      return;
+  }
+
+  // --- Werte konvertieren ---
+  int buttonId = buttonIdStr.toInt();
+  int length = lengthStr.toInt();
+  int repeat = repeatStr.toInt();
+  int out = outStr.toInt();
+
+  Serial.printf("    Button ID received: %d\n", buttonId);
+  Serial.println("    Read Parameters (manually scanned):");
+  Serial.println("      Name: '" + name + "'");
+  Serial.println("      Type: '" + type + "'");
+  Serial.println("      Data: '" + data + "'");
+  Serial.println("      Length: " + String(length));
+  Serial.println("      Address: '" + address + "'");
+  Serial.println("      Repeat: " + String(repeat));
+  Serial.println("      Out: " + String(out));
+
+  name.trim();
+
+  // --- Validierung ---
+  if (name.length() == 0 || data.length() == 0 || length <= 0) {
+      Serial.println("    ERROR: Validation failed! (name, data, or length invalid). Redirecting.");
+      request->redirect("/buttons?status=error_invalid_data");
+      return;
+  }
+  Serial.println("    Validation passed.");
+  // Defaults setzen, falls Konvertierung fehlschlug oder Wert 0 war
+  if (repeat <= 0) repeat = 1;
+  if (out <= 0 || out > 4) out = 1; // Prüfe auch auf <=0
+
+  // --- Entscheiden: Add oder Edit ---
+  if (buttonId == -1) { // Neuer Button
+    Serial.println("    -> Entering ADD logic.");
+    if (buttonConfigs.size() >= MAX_BUTTONS) {
+       Serial.println("      ERROR: Maximum number of buttons reached!");
+       request->redirect("/buttons?status=error_max_buttons");
+       return;
+    }
+
+    Serial.println("    Adding new button: " + name);
+    ButtonConfig newButton;
+    strncpy(newButton.name, name.c_str(), sizeof(newButton.name) - 1);
+    newButton.name[sizeof(newButton.name) - 1] = '\0';
+    strncpy(newButton.type, type.c_str(), sizeof(newButton.type) - 1);
+    newButton.type[sizeof(newButton.type) - 1] = '\0';
+    strncpy(newButton.data, data.c_str(), sizeof(newButton.data) - 1);
+    newButton.data[sizeof(newButton.data) - 1] = '\0';
+    newButton.length = length;
+    strncpy(newButton.address, address.c_str(), sizeof(newButton.address) - 1);
+    newButton.address[sizeof(newButton.address) - 1] = '\0';
+    newButton.repeat = repeat;
+    newButton.out = out;
+    newButton.configured = true;
+
+    buttonConfigs.push_back(newButton);
+    Serial.printf("    Vector size after add: %d\n", buttonConfigs.size());
+
+  } else if (buttonId >= 0 && buttonId < buttonConfigs.size()) { // Button bearbeiten
+    Serial.println("    -> Entering EDIT logic for ID: " + String(buttonId));
+    ButtonConfig& existingButton = buttonConfigs[buttonId];
+
+    strncpy(existingButton.name, name.c_str(), sizeof(existingButton.name) - 1);
+    existingButton.name[sizeof(existingButton.name) - 1] = '\0';
+    strncpy(existingButton.type, type.c_str(), sizeof(existingButton.type) - 1);
+    existingButton.type[sizeof(existingButton.type) - 1] = '\0';
+    strncpy(existingButton.data, data.c_str(), sizeof(existingButton.data) - 1);
+    existingButton.data[sizeof(existingButton.data) - 1] = '\0';
+    existingButton.length = length;
+    strncpy(existingButton.address, address.c_str(), sizeof(existingButton.address) - 1);
+    existingButton.address[sizeof(existingButton.address) - 1] = '\0';
+    existingButton.repeat = repeat;
+    existingButton.out = out;
+    existingButton.configured = true;
+
+    Serial.println("    Button data updated in vector.");
+
+  } else { // Ungültige ID
+    Serial.println("    ERROR: Invalid button_id received: " + String(buttonId));
+    request->redirect("/buttons?status=error_invalid_id");
+    return;
+  }
+
+  // --- Speichern und Redirect ---
+  Serial.println("    -> Calling saveButtonConfig()...");
+  saveButtonConfig();
+  Serial.println("    -> Redirecting to /buttons?status=saved");
+  request->redirect("/buttons?status=saved");
+}
+
+//+=============================================================================
+// Handler for Button Configuration Overview Page (NEU)
+//
+void handleButtonConfigPage(AsyncWebServerRequest *request) {
+  Serial.println("Connection received endpoint '/buttons' (GET)");
+
+  AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", 200);
+  sendHeader(response);
+
+  response->print("      <div class='row'>\n");
+  response->print("        <div class='col-md-12'>\n");
+  response->print("          <h2>Configure Remote Buttons</h2>\n");
+
+  // --- Feedback-Meldungen anzeigen ---
+  if (request->hasParam("status")) {
+      String status = request->getParam("status")->value();
+      if (status == "saved") {
+          response->print("<div class='alert alert-success'>Button saved successfully.</div>");
+      } else if (status == "deleted") {
+          response->print("<div class='alert alert-success'>Button deleted successfully.</div>");
+      } else if (status == "error_invalid_id") {
+          response->print("<div class='alert alert-danger'>Error: Invalid button ID specified.</div>");
+      }
+      // Weitere Status nach Bedarf
+  }
+
+  response->print("          <table class='table table-striped'>\n");
+  response->print("            <thead><tr><th>Name</th><th>Type</th><th>Data</th><th>Actions</th></tr></thead>\n");
+  response->print("            <tbody>\n");
+
+  if (!buttonConfigs.empty()) {
+    for (size_t i = 0; i < buttonConfigs.size(); ++i) {
+      const auto& button = buttonConfigs[i];
+      response->print("              <tr>\n");
+      response->print("                <td>" + String(button.name) + "</td>\n");
+      response->print("                <td><code>" + String(button.type) + "</code></td>\n");
+      response->print("                <td><code>" + String(button.data) + " (" + String(button.length) + " bits)</code></td>\n");
+      response->print("                <td>\n");
+      // Edit Link mit ID (Index)
+      response->print("                  <a href='/editbutton?id=" + String(i) + "' class='btn btn-xs btn-warning'>Edit</a>\n");
+      // Delete Link mit ID (Index) und Bestätigung
+      response->print("                  <a href='/deletebutton?id=" + String(i) + "' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure you want to delete button \\'" + String(button.name) + "\\'?\");'>Delete</a>\n");
+      response->print("                </td>\n");
+      response->print("              </tr>\n");
+    }
+  } else {
+    response->print("              <tr><td colspan='4' class='text-center'><em>No buttons configured.</em></td></tr>\n");
+  }
+
+  response->print("            </tbody>\n");
+  response->print("          </table>\n");
+  // Button zum Hinzufügen eines neuen Buttons
+  response->print("          <a href='/addbutton' class='btn btn-success'>Add New Button</a>\n");
+  response->print("          <a href='/' class='btn btn-default' style='margin-left: 10px;'>Back to Home</a>\n"); // Zurück zur Hauptseite
+  response->print("        </div>\n");
+  response->print("      </div>\n");
+
+  sendFooter(response);
+  request->send(response);
+}
 
 //+=============================================================================
 // Handler to Save Button Configuration
@@ -800,24 +1066,15 @@ void handleSaveButtons(AsyncWebServerRequest *request) {
 // Handler to Send IR Code from a Remote Button (AJAX - GET with URL Params)
 //
 void handleSendButton(AsyncWebServerRequest *request) {
-  Serial.println("Connection received endpoint '/sendbutton' (GET)");
-
-  // --- Security Check (optional) ---
-  // String pass = request->hasParam("pass") ? request->getParam("pass")->value() : "";
-  // if (!allowLocalBypass(request->client()->remoteIP()) && !isPasscodeValid(pass)) {
-  //   Serial.println("Unauthorized access to /sendbutton (passcode)");
-  //   sendCorsHeaders(request); // CORS für AJAX
-  //   request->send(401, "text/plain", "Unauthorized, invalid passcode");
-  //   return;
-  // }
+  Serial.println("==> handleSendButton: Entered function.");
 
   // --- Argument Parsing (aus URL-Parametern) ---
   if (!request->hasParam("type") || !request->hasParam("data") || !request->hasParam("length")) {
-    Serial.println("Missing required arguments for /sendbutton (type, data, length)");
-    // sendCorsHeaders(request); // CORS für AJAX
+    Serial.println("    ERROR: Missing required parameters!");
     request->send(400, "text/plain", "Bad Request: Missing required IR parameters (type, data, length).");
     return;
   }
+  Serial.println("    Required parameters present.");
 
   String type = request->getParam("type")->value();
   String dataStr = request->getParam("data")->value();
@@ -828,39 +1085,56 @@ void handleSendButton(AsyncWebServerRequest *request) {
       if (addressStr.startsWith("0x")) {
           address = strtoul(addressStr.c_str(), 0, 0);
       } else {
-          // Versuche, als Hex zu parsen, auch ohne 0x
           address = strtoul(("0x" + addressStr).c_str(), 0, 0);
       }
   }
+  // --- KORREKTUR: Stelle sicher, dass 'repeat' hier deklariert wird ---
   int repeat = request->hasParam("repeat") ? request->getParam("repeat")->value().toInt() : 1;
   int out = request->hasParam("out") ? request->getParam("out")->value().toInt() : 1;
 
-  // Default values for delays/pulse (könnten auch als Parameter hinzugefügt werden)
-  int rdelay = 1000;
-  int pulse = 1;
-  int pdelay = 100;
+  // --- KORREKTUR: Deklaration für rdelay, pulse, pdelay hinzufügen ---
+  int rdelay = 1000; // Default repeat delay
+  int pulse = 1;     // Default pulse count
+  int pdelay = 100;  // Default pulse delay
+
+  // --- Parameter ausgeben ---
+  Serial.println("    Read Parameters:");
+  Serial.println("      Type: " + type);
+  Serial.println("      Data: " + dataStr);
+  Serial.println("      Length: " + String(len));
+  Serial.println("      Address: " + String(address, HEX));
+  Serial.println("      Repeat: " + String(repeat)); // Jetzt sollte 'repeat' bekannt sein
+  Serial.println("      Out: " + String(out));
+  // --- ENDE Parameter ausgeben ---
+
 
   // Validate inputs (basic)
   if (type.length() == 0 || dataStr.length() == 0 || len == 0) {
-      Serial.println("Invalid arguments received via /sendbutton (empty type/data or length 0)");
-      // sendCorsHeaders(request); // CORS für AJAX
+      Serial.println("    ERROR: Validation failed!");
       request->send(400, "text/plain", "Bad Request: Invalid IR parameters.");
       return;
   }
-  if (repeat <= 0) repeat = 1;
+   Serial.println("    Validation passed.");
+  if (repeat <= 0) repeat = 1; // Diese Zeile ist ok, da repeat jetzt deklariert ist
   if (out < 1 || out > 4) out = 1;
 
-  // --- Trigger IR Blast ---
-  Serial.println("Calling irblast from button press (GET)...");
-  digitalWrite(ledpin, LOW); // Turn LED on during send
-  ticker.attach(0.5, disableLed); // Schedule LED turn off
+// --- Trigger IR Blast ---
+Serial.println("    -> Calling irblast...");
 
-  // Call the existing irblast function
-  irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
+Serial.println("      Setting LED LOW..."); // NEU
+digitalWrite(ledpin, LOW);
+Serial.println("      LED set LOW."); // NEU
+
+Serial.println("      Attaching ticker..."); // NEU
+ticker.attach(0.5, disableLed);
+Serial.println("      Ticker attached."); // NEU
+
+Serial.println("      Now calling irblast function..."); // NEU
+irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
 
   // --- Send Success Response ---
-  // sendCorsHeaders(request); // Wichtig für AJAX
-  request->send(200, "text/plain", "OK"); // Einfache Bestätigung
+  Serial.println("    <- Sending OK response.");
+  request->send(200, "text/plain", "OK");
 }
 
 
@@ -1375,13 +1649,13 @@ void setup() {
   }); // End request->on("/received")
 
 
-    // --- NEUE SERVER-HANDLER REGISTRIEREN ---
-    server->on("/buttons", HTTP_GET, handleButtonConfigPage);
-    server->on("/savebuttons", HTTP_POST, handleSaveButtons);
-    server->on("/sendir", HTTP_POST, handleSendIr); // NEUE ZEILE: Handler für Formular-POST registrieren
+    // --- NEUE/GEÄNDERTE BUTTON HANDLER ---
+    server->on("/buttons", HTTP_GET, handleButtonConfigPage);      // Zeigt die Übersicht
+    server->on("/addbutton", HTTP_GET, handleAddButtonPage);       // Zeigt leeres Formular
+    server->on("/editbutton", HTTP_GET, handleEditButtonPage);     // Zeigt befülltes Formular
+    server->on("/deletebutton", HTTP_GET, handleDeleteButton);   // Löscht Button (GET für Einfachheit, POST wäre besser)
+    server->on("/savebutton", HTTP_POST, handleSaveButton);
     server->on("/sendbutton", HTTP_GET, handleSendButton);
-    server->onNotFound(handleNotFound);
-    // --- ENDE NEUE HANDLER ---
 
     server->begin();
   Serial.println("HTTP Server started on port " + String(port));
@@ -1761,33 +2035,33 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   sendHeader(response); // Übergibt den Stream
 
   // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN +++
+  // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN (Vector Version) +++
   response->print("      <div class='row'>\n");
   response->print("        <div class='col-md-12'>\n");
   response->print("          <h3>Remote Buttons</h3>\n");
   response->print("          <div id='remote-buttons' class='text-center'>\n"); // Container für Buttons
 
-  bool anyButtonConfigured = false;
-  for (int i = 0; i < MAX_BUTTONS; ++i) {
-    if (buttonConfigs[i].configured) {
-      anyButtonConfigured = true;
+  if (!buttonConfigs.empty()) { // Prüfen, ob Buttons vorhanden sind
+    // Iteriere durch den Vector
+    for (size_t i = 0; i < buttonConfigs.size(); ++i) {
+      const auto& button = buttonConfigs[i]; // Referenz für Lesbarkeit
       // Baue den Button-String zusammen
       String buttonHtml = "            <button class='btn btn-primary btn-lg remote-button' style='margin: 5px;' ";
-      buttonHtml += "data-type='" + String(buttonConfigs[i].type) + "' ";
-      buttonHtml += "data-data='" + String(buttonConfigs[i].data) + "' ";
-      buttonHtml += "data-length='" + String(buttonConfigs[i].length) + "' ";
-      buttonHtml += "data-address='" + String(buttonConfigs[i].address) + "' ";
-      buttonHtml += "data-repeat='" + String(buttonConfigs[i].repeat) + "' ";
-      buttonHtml += "data-out='" + String(buttonConfigs[i].out) + "'>";
-      buttonHtml += String(buttonConfigs[i].name); // Button-Beschriftung
+      buttonHtml += "data-type='" + String(button.type) + "' ";
+      buttonHtml += "data-data='" + String(button.data) + "' ";
+      buttonHtml += "data-length='" + String(button.length) + "' ";
+      buttonHtml += "data-address='" + String(button.address) + "' ";
+      buttonHtml += "data-repeat='" + String(button.repeat) + "' ";
+      buttonHtml += "data-out='" + String(button.out) + "'>";
+      buttonHtml += String(button.name); // Button-Beschriftung
       buttonHtml += "</button>\n";
-      response->print(buttonHtml); // Schreibe in den Stream
+      response->print(buttonHtml);
     }
-  }
-
-  if (!anyButtonConfigured) {
+  } else {
       response->print("            <p><em>No remote buttons configured yet.</em></p>\n");
   }
 
+  // Link zur Konfigurationsübersicht (wo man hinzufügen/bearbeiten/löschen kann)
   response->print("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
   response->print("          </div>\n");
   response->print("        </div>\n");
