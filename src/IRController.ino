@@ -608,6 +608,50 @@ WiFi.onEvent(WiFiEvent);
 }
 
 
+//+=============================================================================
+// Hilfsfunktion zum Generieren des Type-Dropdowns
+//+=============================================================================
+String generateTypeDropdownHtml(const String& selectName, const String& selectedValue) {
+  String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
+  // Helper innerhalb der Funktion
+  auto addSelected = [&](const String& val) { return val.equalsIgnoreCase(selectedValue) ? " selected" : ""; };
+
+  html += String("  <option value='nec'") + addSelected("nec") + ">NEC</option>\n";
+  html += String("  <option value='sony'") + addSelected("sony") + ">SONY</option>\n";
+  html += String("  <option value='rc5'") + addSelected("rc5") + ">RC5</option>\n";
+  html += String("  <option value='rc6'") + addSelected("rc6") + ">RC6</option>\n";
+  html += String("  <option value='panasonic'") + addSelected("panasonic") + ">PANASONIC</option>\n";
+  html += String("  <option value='lg'") + addSelected("lg") + ">LG</option>\n";
+  html += String("  <option value='jvc'") + addSelected("jvc") + ">JVC</option>\n";
+  html += String("  <option value='samsung'") + addSelected("samsung") + ">SAMSUNG</option>\n";
+  html += String("  <option value='whynter'") + addSelected("whynter") + ">WHYNTER</option>\n";
+  html += String("  <option value='coolix'") + addSelected("coolix") + ">COOLIX</option>\n";
+  html += String("  <option value='denon'") + addSelected("denon") + ">DENON</option>\n";
+  html += String("  <option value='sharp'") + addSelected("sharp") + ">SHARP</option>\n";
+  html += String("  <option value='sharpraw'") + addSelected("sharpraw") + ">SHARPRAW</option>\n";
+  html += String("  <option value='dish'") + addSelected("dish") + ">DISH</option>\n";
+  html += String("  <option value='gree'") + addSelected("gree") + ">GREE</option>\n";
+  html += String("  <option value='lutron'") + addSelected("lutron") + ">LUTRON</option>\n";
+  html += String("  <option value='roomba'") + addSelected("roomba") + ">ROOMBA</option>\n";
+  html += String("  <option value='ecoclim'") + addSelected("ecoclim") + ">ECOCLIM</option>\n";
+  // Füge hier weitere Typen hinzu, falls nötig. Sie gelten dann für beide Formulare.
+  html += "</select>\n";
+  return html;
+}
+
+// Optional: Globale Hilfsfunktion für Output-Dropdown (falls noch nicht geschehen)
+String generateOutDropdownHtml(const String& selectName, int selectedValue) {
+  String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
+  auto addOutSelected = [&](int val) { return (val == selectedValue) ? " selected" : ""; };
+  html += String("  <option value='1'") + addOutSelected(1) + ">1 (GPIO " + String(pins1) + ")</option>\n";
+  html += String("  <option value='2'") + addOutSelected(2) + ">2 (GPIO " + String(pins2) + ")</option>\n";
+  html += String("  <option value='3'") + addOutSelected(3) + ">3 (GPIO " + String(pins3) + ")</option>\n";
+  html += String("  <option value='4'") + addOutSelected(4) + ">4 (GPIO " + String(pins4) + ")</option>\n";
+  html += "</select>\n";
+  return html;
+}
+
+
 // Hilfsfunktion zum Generieren des Formulars für einen Button
 void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& buttonData, int buttonId) {
   String prefix = "btn_"; // Einheitlicher Prefix
@@ -620,56 +664,19 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("          <form class='form-horizontal' action='" + actionUrl + "' method='post'>\n");
   response->print("            <input type='hidden' name='button_id' value='" + String(buttonId) + "'>\n");
 
-  // --- KORREKTUR: Lambdas HIER implementieren ---
-  auto generateTypeDropdown = [&](const String& selectName, const String& selectedValue) -> String { // Explizit String als Rückgabetyp
-      String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
-      auto addSelected = [&](const String& val) { return val.equalsIgnoreCase(selectedValue) ? " selected" : ""; };
-      html += String("  <option value='nec'") + addSelected("nec") + ">NEC</option>\n";
-      html += String("  <option value='sony'") + addSelected("sony") + ">SONY</option>\n";
-      html += String("  <option value='rc5'") + addSelected("rc5") + ">RC5</option>\n";
-      html += String("  <option value='rc6'") + addSelected("rc6") + ">RC6</option>\n";
-      html += String("  <option value='panasonic'") + addSelected("panasonic") + ">PANASONIC</option>\n";
-      html += String("  <option value='lg'") + addSelected("lg") + ">LG</option>\n";
-      html += String("  <option value='jvc'") + addSelected("jvc") + ">JVC</option>\n";
-      html += String("  <option value='samsung'") + addSelected("samsung") + ">SAMSUNG</option>\n";
-      html += String("  <option value='whynter'") + addSelected("whynter") + ">WHYNTER</option>\n";
-      html += String("  <option value='coolix'") + addSelected("coolix") + ">COOLIX</option>\n";
-      html += String("  <option value='denon'") + addSelected("denon") + ">DENON</option>\n";
-      html += String("  <option value='sharp'") + addSelected("sharp") + ">SHARP</option>\n";
-      html += String("  <option value='sharpraw'") + addSelected("sharpraw") + ">SHARPRAW</option>\n";
-      html += String("  <option value='dish'") + addSelected("dish") + ">DISH</option>\n";
-      html += String("  <option value='gree'") + addSelected("gree") + ">GREE</option>\n";
-      html += String("  <option value='lutron'") + addSelected("lutron") + ">LUTRON</option>\n";
-      html += String("  <option value='roomba'") + addSelected("roomba") + ">ROOMBA</option>\n";
-      html += String("  <option value='ecoclim'") + addSelected("ecoclim") + ">ECOCLIM</option>\n";
-      html += "</select>\n";
-      return html; // WICHTIG: String zurückgeben
-  };
-
-  auto generateOutDropdown = [&](const String& selectName, int selectedValue) -> String { // Explizit String als Rückgabetyp
-      String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
-      auto addOutSelected = [&](int val) { return (val == selectedValue) ? " selected" : ""; };
-      html += String("  <option value='1'") + addOutSelected(1) + ">1 (GPIO " + String(pins1) + ")</option>\n";
-      html += String("  <option value='2'") + addOutSelected(2) + ">2 (GPIO " + String(pins2) + ")</option>\n";
-      html += String("  <option value='3'") + addOutSelected(3) + ">3 (GPIO " + String(pins3) + ")</option>\n";
-      html += String("  <option value='4'") + addOutSelected(4) + ">4 (GPIO " + String(pins4) + ")</option>\n";
-      html += "</select>\n";
-      return html; // WICHTIG: String zurückgeben
-  };
-  // --- ENDE LAMBDA IMPLEMENTIERUNGEN ---
-
   // --- Formularfelder ---
   // Name
   response->print("            <div class='form-group'>\n");
-  response->print("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n");
-  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label' value='" + String(buttonData.name) + "' required></div>\n");
+  response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
+  // --- KORREKTUR: Globale Funktion aufrufen ---
+  response->print("              <div class='col-sm-10'>" + generateTypeDropdownHtml(prefix + "type", String(buttonData.type)) + "</div>\n");
   response->print("            </div>\n");
 
   // Type
   response->print("            <div class='form-group'>\n");
-  response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
-  // KORREKTUR: Lambda aufrufen und Ergebnis verketten
-  response->print("              <div class='col-sm-10'>" + generateTypeDropdown(prefix + "type", String(buttonData.type)) + "</div>\n");
+  response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
+  // --- KORREKTUR: Globale Funktion aufrufen ---
+  response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
   response->print("            </div>\n");
 
   // Data
@@ -699,8 +706,8 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   // Output Pin
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
-  // KORREKTUR: Lambda aufrufen und Ergebnis verketten
-  response->print("              <div class='col-sm-10'>" + generateOutDropdown(prefix + "out", buttonData.out) + "</div>\n");
+  // --- KORREKTUR: Globale Funktion aufrufen ---
+  response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
   response->print("            </div>\n");
 
   // --- Submit/Cancel Buttons ---
@@ -1137,79 +1144,117 @@ irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(o
   request->send(200, "text/plain", "OK");
 }
 
-
 //+=============================================================================
 // Handler for the IR sending form
 //
 void handleSendIr(AsyncWebServerRequest *request) {
   Serial.println("Connection received endpoint '/sendir' (POST)");
 
-  // --- Security Check (optional but recommended) ---
-  // You might want to reuse parts of the security checks from /msg or /json
-  // For simplicity, we'll skip strict HMAC for now, assuming access to the page was already authenticated.
-  // Add passcode check if needed:
-  /*
-  if (!allowLocalBypass(request->client().remoteIP()) && !isPasscodeValid(request->arg("pass"))) { // 'pass' needs to be added to the form if used
-      Serial.println("Unauthorized access (passcode)");
-      sendCorsHeaders(); // May not be needed if not called via AJAX
-      request->send(401, "text/plain", "Unauthorized, invalid passcode");
+  // --- NEUER ANSATZ: Parameter manuell per Index suchen ---
+  int params = request->params();
+  Serial.printf("    Scanning %d parameters (handleSendIr)...\n", params);
+
+  // Lokale Variablen für die gelesenen Werte initialisieren
+  String type = "";
+  String dataStr = "";
+  String lengthStr = ""; // Länge als String lesen
+  String addressStr = ""; // Adresse als String lesen
+  String repeatStr = ""; // Repeat als String lesen
+  String outStr = "";    // Out als String lesen
+  bool typeFound = false, dataFound = false, lengthFound = false; // Flags für erforderliche Felder
+
+  for(int i=0; i<params; i++){
+    const AsyncWebParameter* p = request->getParam(i);
+    // Nur POST-Parameter berücksichtigen
+    if(p->isPost()){
+      String paramName = p->name();
+      String paramValue = p->value();
+      Serial.printf("      POST[%s]: %s\n", paramName.c_str(), paramValue.c_str()); // Debug
+
+      // Werte basierend auf dem Namen zuweisen
+      if (paramName.equals("type")) {
+        type = paramValue;
+        typeFound = true;
+      } else if (paramName.equals("data")) {
+        dataStr = paramValue;
+        dataFound = true;
+      } else if (paramName.equals("length")) {
+        lengthStr = paramValue;
+        lengthFound = true;
+      } else if (paramName.equals("address")) {
+        addressStr = paramValue;
+      } else if (paramName.equals("repeat")) {
+        repeatStr = paramValue;
+      } else if (paramName.equals("out")) {
+        outStr = paramValue;
+      }
+    } else {
+       Serial.printf("      Ignoring non-POST param[%s]: %s\n", p->name().c_str(), p->value().c_str());
+    }
+  }
+  Serial.println("    Parameter scan complete (handleSendIr).");
+  // --- ENDE NEUER ANSATZ ---
+
+  // --- Prüfung, ob erforderliche Parameter gefunden wurden ---
+  if (!typeFound || !dataFound || !lengthFound) {
+      Serial.println("    ERROR: Missing required arguments (type, data, or length) during manual scan!");
+      request->redirect("/?status=error_missing_args");
       return;
   }
-  */
 
-  // --- Argument Parsing ---
-  if (!request->hasArg("type") || !request->hasArg("data") || !request->hasArg("length")) {
-    Serial.println("Missing required arguments (type, data, length)");
-    // Redirect back to home page with an error message
-    request->redirect("/?status=error_missing_args");
-    return;
-  }
-
-  String type = request->arg("type");
-  String dataStr = request->arg("data");
-  unsigned int len = request->arg("length").toInt();
+  // --- Werte konvertieren ---
+  unsigned int len = lengthStr.toInt();
   long address = 0;
-  if (request->hasArg("address") && request->arg("address").length() > 0) {
-      // Handle potential "0x" prefix if users add it
-      String addressStr = request->arg("address");
+  if (addressStr.length() > 0) {
       if (addressStr.startsWith("0x")) {
-          address = strtoul(addressStr.c_str(), 0, 0); // Base 0 auto-detects 0x
+          address = strtoul(addressStr.c_str(), 0, 0);
       } else {
-          address = strtoul(("0x" + addressStr).c_str(), 0, 0); // Assume hex if not prefixed
+          address = strtoul(("0x" + addressStr).c_str(), 0, 0);
       }
   }
-  int repeat = (request->hasArg("repeat")) ? request->arg("repeat").toInt() : 1;
-  int out = (request->hasArg("out")) ? request->arg("out").toInt() : 1;
+  int repeat = repeatStr.toInt();
+  int out = outStr.toInt();
 
-  // Default values for delays/pulse if not included in the simple form
-  int rdelay = 1000; // Default repeat delay
-  int pulse = 1;     // Default pulse count
-  int pdelay = 100;  // Default pulse delay
+  // Default values for delays/pulse (werden nicht aus Formular gelesen)
+  int rdelay = 1000;
+  int pulse = 1;
+  int pdelay = 100;
+
+  // --- Parameter ausgeben (zum Debuggen) ---
+  Serial.println("    Read Parameters (handleSendIr - manually scanned):");
+  Serial.println("      Type: '" + type + "'");
+  Serial.println("      Data: '" + dataStr + "'");
+  Serial.println("      Length: " + String(len));
+  Serial.println("      Address: " + String(address, HEX));
+  Serial.println("      Repeat: " + String(repeat));
+  Serial.println("      Out: " + String(out));
+  // --- ENDE Parameter ausgeben ---
 
   // Validate inputs (basic)
-  if (len == 0 || dataStr.length() == 0) {
-      Serial.println("Invalid arguments (length or data empty)");
+  if (len == 0 || dataStr.length() == 0) { // type wurde schon geprüft
+      Serial.println("    ERROR: Validation failed in handleSendIr (len=0 or data empty)!");
       request->redirect("/?status=error_invalid_args");
       return;
   }
+   Serial.println("    Validation passed in handleSendIr.");
+  // Defaults setzen, falls Konvertierung fehlschlug oder Wert 0 war
   if (repeat <= 0) repeat = 1;
-  if (out < 1 || out > 4) out = 1;
+  if (out <= 0 || out > 4) out = 1;
 
 
   // --- Trigger IR Blast ---
-  Serial.println("Calling irblast from form...");
-  digitalWrite(ledpin, LOW); // Turn LED on during send
-  ticker.attach(0.5, disableLed); // Schedule LED turn off
+  Serial.println("    -> Calling irblast from form...");
+  digitalWrite(ledpin, LOW);
+  ticker.attach(0.5, disableLed);
 
-  // Call the existing irblast function
-// OLD: irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out));
-// NEW: Pass 'out' as the last argument
-irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
-
+  irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
+  Serial.println("    <- irblast call returned (from form).");
 
   // --- Redirect back to home page with success message ---
+  Serial.println("    -> Redirecting to /?status=success");
   request->redirect("/?status=success");
 }
+
 
 // Beispiel für einen Not Found Handler
 void handleNotFound(AsyncWebServerRequest *request) {
@@ -1656,6 +1701,7 @@ void setup() {
     server->on("/deletebutton", HTTP_GET, handleDeleteButton);   // Löscht Button (GET für Einfachheit, POST wäre besser)
     server->on("/savebutton", HTTP_POST, handleSaveButton);
     server->on("/sendbutton", HTTP_GET, handleSendButton);
+    server->on("/sendir", HTTP_POST, handleSendIr);
 
     server->begin();
   Serial.println("HTTP Server started on port " + String(port));
@@ -2159,11 +2205,9 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='type' class='col-sm-2 control-label'>Type</label>\n");
   response->print("              <div class='col-sm-10'>\n");
-  response->print("                <select class='form-control' id='type' name='type'>\n");
-  response->print(String("                  <option value='nec'") + addSelected("nec") + ">NEC</option>\n");
-  // ... (alle anderen Optionen mit response->print) ...
-  response->print(String("                  <option value='ecoclim'") + addSelected("ecoclim") + ">ECOCLIM</option>\n");
-  response->print("                </select>\n");
+  // --- KORREKTUR: Globale Funktion aufrufen ---
+  // Übergibt "type" als Namen des Select-Elements und lastEncoding als vorselektierten Wert
+  response->print(generateTypeDropdownHtml("type", lastEncoding));
   response->print("              </div>\n");
   response->print("            </div>\n");
 
@@ -2195,12 +2239,9 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='out' class='col-sm-2 control-label'>Output Pin</label>\n");
   response->print("              <div class='col-sm-10'>\n");
-  response->print("                 <select class='form-control' id='out' name='out'>\n");
-  response->print(String("                   <option value='1'") + addOutSelected("1") + ">1 (GPIO " + String(pins1) + ")</option>\n");
-  response->print(String("                   <option value='2'") + addOutSelected("2") + ">2 (GPIO " + String(pins2) + ")</option>\n");
-  response->print(String("                   <option value='3'") + addOutSelected("3") + ">3 (GPIO " + String(pins3) + ")</option>\n");
-  response->print(String("                   <option value='4'") + addOutSelected("4") + ">4 (GPIO " + String(pins4) + ")</option>\n");
-  response->print("                 </select>\n");
+  // --- KORREKTUR: Globale Funktion aufrufen ---
+  // Übergibt "out" als Namen und lastOut (als int konvertiert) als vorselektierten Wert
+  response->print(generateOutDropdownHtml("out", lastOut.toInt()));
   response->print("              </div>\n");
   response->print("            </div>\n");
 
