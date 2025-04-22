@@ -710,11 +710,14 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
   response->print("            </div>\n");
 
-  // --- Submit/Cancel Buttons ---
+  // --- Submit/Cancel/Test Buttons --- // Geändert
   response->print("            <div class='form-group'>\n");
   response->print("              <div class='col-sm-offset-2 col-sm-10'>\n");
   response->print("                <button type='submit' class='btn btn-success'>Save Button</button>\n");
-  response->print("                <a href='/buttons' class='btn btn-default'>Cancel</a>\n");
+  // --- NEU: Test Send Button ---
+  response->print("                <button type='button' id='test-send-button' class='btn btn-info' style='margin-left: 10px;'>Test Send</button>\n");
+  // --- ENDE NEU ---
+  response->print("                <a href='/buttons' class='btn btn-default' style='margin-left: 10px;'>Cancel</a>\n"); // Style für Abstand
   response->print("              </div>\n");
   response->print("            </div>\n");
 
@@ -2076,10 +2079,82 @@ void sendFooter(AsyncResponseStream *response) {
   if (ntpError)
     response->print("      <div class='row'><div class='col-md-12'><em>Error - last attempt to connect to the NTP server failed...</em></div></div>\n");
 
-  // --- Closing HTML tags ---
-  response->print("    </div>\n");
-  response->print("  </body>\n");
-  response->print("</html>\n");
+ // --- NEU: JavaScript für Test Send Button ---
+ response->print("      <script>\n");
+ response->print("        const testSendButton = document.getElementById('test-send-button');\n");
+ response->print("        if (testSendButton) {\n"); // Nur ausführen, wenn der Button existiert
+ response->print("          testSendButton.addEventListener('click', function(event) {\n");
+ response->print("            console.log('Test Send button clicked.');\n");
+ response->print("            // 1. Werte aus Formularfeldern lesen\n");
+ response->print("            const irData = {};\n");
+ response->print("            const prefix = 'btn_'; // Prefix der Formularfeld-IDs\n");
+ response->print("            try {\n"); // Fehler abfangen, falls Elemente nicht gefunden werden
+ response->print("              irData.type = document.getElementById(prefix + 'type').value;\n");
+ response->print("              irData.data = document.getElementById(prefix + 'data').value;\n");
+ response->print("              irData.length = parseInt(document.getElementById(prefix + 'length').value, 10);\n");
+ response->print("              irData.address = document.getElementById(prefix + 'address').value;\n");
+ response->print("              irData.repeat = parseInt(document.getElementById(prefix + 'repeat').value, 10);\n");
+ response->print("              irData.out = parseInt(document.getElementById(prefix + 'out').value, 10);\n");
+ response->print("            } catch (e) {\n");
+ response->print("              console.error('Error reading form values:', e);\n");
+ response->print("              alert('Error reading form values. Check console.');\n");
+ response->print("              return; // Abbruch\n");
+ response->print("            }\n");
+
+ response->print("            // 2. Einfache Validierung\n");
+ response->print("            if (!irData.type || !irData.data || !irData.length || irData.length <= 0) {\n");
+ response->print("              alert('Please fill in at least Type, Data, and a valid Length (>0).');\n");
+ response->print("              return; // Abbruch\n");
+ response->print("            }\n");
+ response->print("            if (!irData.repeat || irData.repeat <= 0) irData.repeat = 1;\n"); // Default repeat
+ response->print("            if (!irData.out || irData.out <= 0 || irData.out > 4) irData.out = 1;\n"); // Default out
+
+ response->print("            console.log('Sending Test IR:', irData);\n");
+
+ response->print("            // 3. Visuelles Feedback (optional)\n");
+ response->print("            const originalText = testSendButton.textContent;\n");
+ response->print("            testSendButton.textContent = 'Sending...';\n");
+ response->print("            testSendButton.disabled = true;\n");
+
+ response->print("            // 4. URL-Parameter erstellen\n");
+ response->print("            const urlParams = new URLSearchParams({\n");
+ response->print("              type: irData.type,\n");
+ response->print("              data: irData.data,\n");
+ response->print("              length: irData.length,\n");
+ response->print("              address: irData.address,\n");
+ response->print("              repeat: irData.repeat,\n");
+ response->print("              out: irData.out\n");
+ response->print("            }).toString();\n");
+
+ response->print("            // 5. Fetch-Request an /sendbutton senden\n");
+ response->print("            fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
+ response->print("            .then(response => {\n");
+ response->print("              if (!response.ok) {\n");
+ response->print("                console.error('Error sending Test IR command via GET. Status:', response.status);\n");
+ response->print("                alert('Error sending test command. Check console.');\n"); // Alert für Benutzer
+ response->print("              } else {\n");
+ response->print("                console.log('Test IR command sent successfully.');\n");
+ response->print("              }\n");
+ response->print("              return response.text();\n");
+ response->print("            })\n");
+ response->print("            .then(data => console.log('Server response to test:', data))\n");
+ response->print("            .catch(error => {\n");
+ response->print("              console.error('Fetch error during test send:', error);\n");
+ response->print("              alert('Network error during test send. Check console.');\n");
+ response->print("            })\n");
+ response->print("            .finally(() => {\n"); // Wird immer ausgeführt (nach then/catch)
+ response->print("              // Button wiederherstellen\n");
+ response->print("              testSendButton.textContent = originalText;\n");
+ response->print("              testSendButton.disabled = false;\n");
+ response->print("            });\n");
+
+ response->print("          });\n"); // Ende Event Listener
+ response->print("        }\n"); // Ende if (testSendButton)
+ response->print("      </script>\n");
+ // --- ENDE NEU ---
+
+ response->print("  </body>\n");
+ response->print("</html>\n");
 }
 
 
