@@ -10,6 +10,7 @@
 #include <ArduinoJson.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <AsyncEventSource.h>
 #include <HTTPClient.h>
 #include <ArduinoOTA.h>
 
@@ -26,7 +27,8 @@ const bool getExternalIP = true;                               // Set to false t
 const bool getTime = true;                                     // Set to false to disable querying for the time
 const int timeZone = -5;                                       // Timezone (-5 is EST)
 
-const unsigned int captureBufSize = 1024;                      // Size of the IR capture buffer.
+//const unsigned int captureBufSize = 1024;                      // Size of the IR capture buffer.
+const unsigned int captureBufSize = 512;                      // Size of the IR capture buffer.
 
 const bool toggleRC = true;                                    // Toggle RC signals every other transmission
 
@@ -54,10 +56,13 @@ char static_gw[16] = "10.0.1.1";
 char static_sn[16] = "255.255.255.0";
 char static_dns[16] = "10.0.1.1";
 
-DynamicJsonDocument deviceState(1024);
+// DynamicJsonDocument deviceState(1024);
+DynamicJsonDocument deviceState(256);
 
 WiFiClient client;
 AsyncWebServer *server = NULL;
+// AsyncEventSource events("/events"); // ALT: Objekt direkt erstellen
+AsyncEventSource *events = nullptr; // NEU: Nur Zeiger deklarieren
 Ticker ticker;
 
 bool shouldSaveConfig = false;                                 // Flag for saving data
@@ -139,6 +144,26 @@ std::vector<ButtonConfig> buttonConfigs; // NEU
 //+=============================================================================
 
 
+// --- NEU: Hilfsfunktion zum Senden von Code-Updates als SSE ---
+void sendCodeUpdateEvent(const char* eventName, const Code& code) {
+  // if (events.count() > 0) { // Nur senden, wenn Clients verbunden sind
+  //   DynamicJsonDocument jsonDoc(512); // Ausreichend für ein Code-Objekt
+  //   jsonDoc["encoding"] = code.encoding;
+  //   jsonDoc["data"] = code.data;
+  //   jsonDoc["bits"] = code.bits;
+  //   jsonDoc["address"] = code.address;
+  //   jsonDoc["repeat"] = code.repeat; // Wiederholungen hinzufügen
+  //   jsonDoc["out"] = code.out;       // Output hinzufügen
+  //   jsonDoc["timestamp"] = epochToString(code.timestamp); // Zeit als String
+
+  //   String jsonString;
+  //   serializeJson(jsonDoc, jsonString);
+  //   events.send(jsonString.c_str(), eventName, millis());
+  //   Serial.printf("SSE Event '%s' sent.\n", eventName);
+  // }
+}
+
+
 //+=============================================================================
 // Callback notifying us of the need to save config
 //
@@ -163,7 +188,7 @@ void loadButtonConfig() {
     Serial.println("Reading button config file");
     File configFile = LittleFS.open("/buttons.json", "r");
     if (configFile) {
-      DynamicJsonDocument jsonDoc(2048); // Größe ggf. anpassen (9 Buttons * ~150 Zeichen)
+      DynamicJsonDocument jsonDoc(1536); // Größe ggf. anpassen (9 Buttons * ~150 Zeichen)
       DeserializationError error = deserializeJson(jsonDoc, configFile);
       configFile.close(); // Datei schließen, sobald gelesen
 
@@ -221,7 +246,7 @@ void saveButtonConfig() {
   }
   Serial.println("        LittleFS mounted."); // NEU
 
-  DynamicJsonDocument jsonDoc(4096);
+  DynamicJsonDocument jsonDoc(1024);
   JsonArray buttonArray = jsonDoc.to<JsonArray>();
 
   Serial.printf("        Serializing %d buttons...\n", buttonConfigs.size()); // NEU
@@ -1299,6 +1324,8 @@ void handleNotFound(AsyncWebServerRequest *request) {
 void setup() {
   // Initialize serial
   Serial.begin(115200);
+  Serial.println("\n\nBooting..."); // Frühe Meldung
+  Serial.printf("Free Heap at start: %u\n", ESP.getFreeHeap()); // Speicher ganz am Anfang
 
   // set led pin as output
   pinMode(ledpin, OUTPUT);
@@ -1314,7 +1341,8 @@ void setup() {
     return;
 
   Serial.println("WiFi configuration complete");
-
+  Serial.printf("Free Heap after WiFi: %u\n", ESP.getFreeHeap()); // Speicher nach WiFi
+  
   // --- TEMPORÄRER CODE ZUM FORMATIEREN ---
   // Diesen Block einkommentieren, EINMAL flashen & laufen lassen,
   // dann wieder auskommentieren und erneut flashen!
@@ -1379,6 +1407,9 @@ void setup() {
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS"); // OPTIONS hinzufügen ist oft gut für Preflight-Requests
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization"); // Erlaube gängige Header
 
+  // NEU: Explizite Header für SSE (oft von DefaultHeaders abgedeckt, aber sicher ist sicher)
+  DefaultHeaders::Instance().addHeader("Cache-Control", "no-cache");
+
     // --- Handler registrieren ---
 
     server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -1425,7 +1456,7 @@ void setup() {
         return; // Wichtig: Handler hier beenden
     }
 
-    DynamicJsonDocument root(4096); // Größe ggf. anpassen
+    DynamicJsonDocument root(1024); // Größe ggf. anpassen
     DeserializationError error = deserializeJson(root, request->getParam("plain")->value());
 
     if (error) {
@@ -1755,6 +1786,36 @@ void setup() {
   irsend4.begin();
   irrecv.enableIRIn();
   Serial.println("Ready to send and receive IR signals");
+
+  // --- NEU: SSE Initialisierung GANZ AM ENDE ---
+  if (server != nullptr) {
+    Serial.println("Creating AsyncEventSource at end of setup..."); // NEU
+    events = new AsyncEventSource("/events");
+    if (events == nullptr) {
+        Serial.println("FATAL ERROR: Failed to allocate memory for AsyncEventSource!");
+        ESP.restart();
+    } else {
+        Serial.println("AsyncEventSource object created.");
+        Serial.printf("Free Heap after AsyncEventSource (end of setup): %u\n", ESP.getFreeHeap()); // NEU
+
+        // onConnect und addHandler jetzt auch aktivieren
+        events->onConnect([](AsyncEventSourceClient *client){ // Pfeil ->
+          if(client->lastId()){
+            Serial.printf("EventSource Client Reconnected! Last ID: %u\n", client->lastId());
+          } else {
+            Serial.println("EventSource Client Connected!");
+          }
+        });
+
+        server->addHandler(events); // KEIN '&' mehr
+        Serial.println("EventSource handler registered at /events");
+    }
+} else {
+    Serial.println("FATAL ERROR: Server object is null, cannot create EventSource!");
+    ESP.restart();
+}
+// --- ENDE NEU ---
+
 }
 
 
@@ -1869,6 +1930,9 @@ int rokuCommand(String ip, String data, int repeat, int rdelay) {
   last_send.repeat = repeat; // Store repeat count
   last_send.out = 1; // Default out pin for Roku
   // +++ ENDE NEUE ZEILEN +++
+
+  // Event senden (nachdem last_send aktualisiert wurde)
+  sendCodeUpdateEvent("codeSent", last_send);
 
   return output;
 }
@@ -2079,6 +2143,75 @@ void sendFooter(AsyncResponseStream *response) {
   if (ntpError)
     response->print("      <div class='row'><div class='col-md-12'><em>Error - last attempt to connect to the NTP server failed...</em></div></div>\n");
 
+    // --- NEU: JavaScript für Server-Sent Events ---
+  response->print("      <script>\n");
+  response->print("        console.log('Setting up EventSource...');\n");
+  response->print("        const evtSource = new EventSource('/events');\n");
+  response->print("        const MAX_TABLE_ROWS = 5; // Max Zeilen pro Tabelle\n");
+
+  response->print("        // Funktion zum Hinzufügen einer Zeile zu einer Tabelle\n");
+  response->print("        function addTableRow(tableBodyId, codeData, isSentTable) {\n");
+  response->print("          const tableBody = document.getElementById(tableBodyId);\n");
+  response->print("          if (!tableBody) return;\n");
+
+  response->print("          // Platzhalter entfernen, falls vorhanden\n");
+  response->print("          const placeholderId = isSentTable ? 'no-sent-codes' : 'no-received-codes';\n");
+  response->print("          const placeholderRow = document.getElementById(placeholderId);\n");
+  response->print("          if (placeholderRow) placeholderRow.remove();\n");
+
+  response->print("          // Neue Zeile erstellen\n");
+  response->print("          let newRowHtml = `<tr class='text-uppercase'>`;\n");
+  response->print("          newRowHtml += `<td>${codeData.timestamp}</td>`;\n");
+  response->print("          newRowHtml += `<td><code>${codeData.data}</code></td>`;\n");
+  response->print("          newRowHtml += `<td><code>${codeData.encoding}</code></td>`;\n");
+  response->print("          newRowHtml += `<td><code>${codeData.bits}</code></td>`;\n");
+  response->print("          newRowHtml += `<td><code>${codeData.address || '-'}</code></td>`;\n");
+  response->print("          if (isSentTable) {\n"); // Zusätzliche Spalten für 'Sent' Tabelle
+  response->print("            newRowHtml += `<td><code>${codeData.repeat}</code></td>`;\n");
+  response->print("            newRowHtml += `<td><code>${codeData.out}</code></td>`;\n");
+  response->print("          }\n");
+  response->print("          newRowHtml += `</tr>`;\n");
+
+  response->print("          // Zeile am Anfang einfügen\n");
+  response->print("          tableBody.insertAdjacentHTML('afterbegin', newRowHtml);\n");
+
+  response->print("          // Alte Zeilen entfernen, wenn Limit überschritten\n");
+  response->print("          while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
+  response->print("            tableBody.deleteRow(-1); // Letzte Zeile löschen\n");
+  response->print("          }\n");
+  response->print("        }\n");
+
+  response->print("        // Event Listener für gesendete Codes\n");
+  response->print("        evtSource.addEventListener('codeSent', function(event) {\n");
+  response->print("          console.log('SSE codeSent:', event.data);\n");
+  response->print("          try {\n");
+  response->print("            const codeData = JSON.parse(event.data);\n");
+  response->print("            addTableRow('sent-codes-body', codeData, true);\n");
+  response->print("          } catch (e) {\n");
+  response->print("            console.error('Error parsing codeSent data:', e);\n");
+  response->print("          }\n");
+  response->print("        });\n");
+
+  response->print("        // Event Listener für empfangene Codes\n");
+  response->print("        evtSource.addEventListener('codeReceived', function(event) {\n");
+  response->print("          console.log('SSE codeReceived:', event.data);\n");
+  response->print("          try {\n");
+  response->print("            const codeData = JSON.parse(event.data);\n");
+  response->print("            addTableRow('received-codes-body', codeData, false);\n");
+  response->print("          } catch (e) {\n");
+  response->print("            console.error('Error parsing codeReceived data:', e);\n");
+  response->print("          }\n");
+  response->print("        });\n");
+
+  response->print("        // Optional: Fehlerbehandlung für die SSE-Verbindung\n");
+  response->print("        evtSource.onerror = function(err) {\n");
+  response->print("          console.error('EventSource failed:', err);\n");
+  response->print("          // Optional: Versuch, die Verbindung wiederherzustellen oder Benutzer informieren\n");
+  response->print("        };\n");
+
+  response->print("      </script>\n");
+  // --- ENDE NEU ---
+
  // --- NEU: JavaScript für Test Send Button ---
  response->print("      <script>\n");
  response->print("        const testSendButton = document.getElementById('test-send-button');\n");
@@ -2246,7 +2379,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("          <h3>Codes Transmitted</h3>\n");
   response->print("          <table class='table table-striped' style='table-layout: fixed;'>\n");
   response->print("            <thead><tr><th>Sent</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th></tr></thead>\n");
-  response->print("            <tbody>\n");
+  response->print("            <tbody id='sent-codes-body'>\n");
   auto generateSentRow = [&](const Code& code) {
       if (code.valid) {
           String rowHtml = "              <tr class='text-uppercase'><td>" + epochToString(code.timestamp) + "</td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td><td><code>" + String(code.repeat) + "</code></td><td><code>" + String(code.out) + "</code></td></tr>\n";
@@ -2258,9 +2391,10 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   generateSentRow(last_send_3);
   generateSentRow(last_send_4);
   generateSentRow(last_send_5);
-  if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
-    response->print("              <tr><td colspan='7' class='text-center'><em>No codes sent</em></td></tr>");
-  response->print("            </tbody></table>\n");
+// NEU: Platzhalterzeile mit ID versehen
+if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
+response->print("              <tr id='no-sent-codes'><td colspan='7' class='text-center'><em>No codes sent</em></td></tr>");
+response->print("            </tbody></table>\n");
   response->print("          </div></div>\n");
 
   // --- Codes Received Table ---
@@ -2269,6 +2403,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("          <h3>Codes Received</h3>\n");
   response->print("          <table class='table table-striped' style='table-layout: fixed;'>\n");
   response->print("            <thead><tr><th>Received</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th></tr></thead>\n");
+  response->print("            <tbody id='received-codes-body'>\n");
   response->print("            <tbody>\n");
   auto generateReceivedRow = [&](const Code& code, int id) {
       if (code.valid) {
@@ -2281,8 +2416,9 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   generateReceivedRow(last_recv_3, 3);
   generateReceivedRow(last_recv_4, 4);
   generateReceivedRow(last_recv_5, 5);
+  // NEU: Platzhalterzeile mit ID versehen
   if (!last_recv.valid && !last_recv_2.valid && !last_recv_3.valid && !last_recv_4.valid && !last_recv_5.valid)
-    response->print("              <tr><td colspan='5' class='text-center'><em>No codes received</em></td></tr>");
+  response->print("              <tr id='no-received-codes'><td colspan='5' class='text-center'><em>No codes received</em></td></tr>");
   response->print("            </tbody></table>\n");
   response->print("          </div></div><hr />\n");
 
@@ -2796,6 +2932,9 @@ void irblast(String type, String dataStr, unsigned int len, int rdelay, int puls
   // +++ ENDE NEUE ZEILEN +++
 
   resetReceive();
+  // NEU: Event senden
+  sendCodeUpdateEvent("codeSent", last_send);
+  Serial.println("  <== irblast: Leaving function."); // Debugging
 }
 
 // OLD: void pronto(JsonArray &pronto, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend) {
@@ -2841,6 +2980,10 @@ void pronto(JsonArray &pronto, int rdelay, int pulse, int pdelay, int repeat, IR
   // +++ ENDE NEUE ZEILEN +++
 
   resetReceive();
+
+  // NEU: Event senden
+  sendCodeUpdateEvent("codeSent", last_send);
+
 }
 
 // OLD: void rawblast(JsonArray &raw, int khz, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend,int duty) {
@@ -2887,6 +3030,9 @@ void rawblast(JsonArray &raw, int khz, int rdelay, int pulse, int pdelay, int re
   // +++ ENDE NEUE ZEILEN +++
 
   resetReceive();
+
+  // NEU: Event senden
+  sendCodeUpdateEvent("codeSent", last_send);
 }
 
 
@@ -2953,10 +3099,14 @@ void loop() {
     cvrtCode(last_recv, &results);                                // Store the results
     last_recv.timestamp = now();                                  // Set the new update time
     last_recv.valid = true;
+
+    // NEU: Event senden
+    sendCodeUpdateEvent("codeReceived", last_recv);
+    
     Serial.println("");                                           // Blank line between entries
     irrecv.resume();                                              // Prepare for the next value
     digitalWrite(ledpin, LOW);                                    // Turn on the LED for 0.5 seconds
     ticker.attach(0.5, disableLed);
   }
-  delay(200);
+  delay(50);
 }
