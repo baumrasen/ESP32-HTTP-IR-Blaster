@@ -1,4 +1,5 @@
 #include <FS.h>                                               // This needs to be first, or it all crashes and burns
+#include "credentials.h" // NEU: Include der Zugangsdaten-Datei
 
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
@@ -22,21 +23,13 @@
 
 // User settings are below here
 //+=============================================================================
-// --- DEINE WIFI DATEN ---
-const char* ssid = "YOURSSID";
-const char* password = "YOURPWD";
-
-const char* custom_hostname = "YOURHOSTNAME";
-const char* custom_passcode = "YOURPSSCODE";
-const char* custom_port = "80";
 
 const bool getExternalIP = true;                               // Set to false to disable querying external IP
 
 const bool getTime = true;                                     // Set to false to disable querying for the time
-const int timeZone = -5;                                       // Timezone (-5 is EST)
+const int timeZone = +2;                                       // Timezone (-5 is EST)
 
-//const unsigned int captureBufSize = 1024;                      // Size of the IR capture buffer.
-const unsigned int captureBufSize = 512;                      // Size of the IR capture buffer.
+const unsigned int captureBufSize = 1024;                      // Size of the IR capture buffer.
 
 const bool toggleRC = true;                                    // Toggle RC signals every other transmission
 
@@ -154,21 +147,21 @@ std::vector<ButtonConfig> buttonConfigs; // NEU
 
 // --- NEU: Hilfsfunktion zum Senden von Code-Updates als SSE ---
 void sendCodeUpdateEvent(const char* eventName, const Code& code) {
-  // if (events.count() > 0) { // Nur senden, wenn Clients verbunden sind
-  //   DynamicJsonDocument jsonDoc(512); // Ausreichend für ein Code-Objekt
-  //   jsonDoc["encoding"] = code.encoding;
-  //   jsonDoc["data"] = code.data;
-  //   jsonDoc["bits"] = code.bits;
-  //   jsonDoc["address"] = code.address;
-  //   jsonDoc["repeat"] = code.repeat; // Wiederholungen hinzufügen
-  //   jsonDoc["out"] = code.out;       // Output hinzufügen
-  //   jsonDoc["timestamp"] = epochToString(code.timestamp); // Zeit als String
+  if (events != nullptr && events->count() > 0) { // <-- Prüfen, ob diese Zeile aktiv ist
+    DynamicJsonDocument jsonDoc(512); // Ausreichend für ein Code-Objekt
+    jsonDoc["encoding"] = code.encoding;
+    jsonDoc["data"] = code.data;
+    jsonDoc["bits"] = code.bits;
+    jsonDoc["address"] = code.address;
+    jsonDoc["repeat"] = code.repeat; // Wiederholungen hinzufügen
+    jsonDoc["out"] = code.out;       // Output hinzufügen
+    jsonDoc["timestamp"] = epochToString(code.timestamp); // Zeit als String
 
-  //   String jsonString;
-  //   serializeJson(jsonDoc, jsonString);
-  //   events.send(jsonString.c_str(), eventName, millis());
-  //   Serial.printf("SSE Event '%s' sent.\n", eventName);
-  // }
+    String jsonString;
+    serializeJson(jsonDoc, jsonString);
+    events->send(jsonString.c_str(), eventName, millis()); // <-- Prüfen, ob diese Zeile aktiv ist
+    Serial.printf("SSE Event '%s' sent.\n", eventName);
+  }
 }
 
 
