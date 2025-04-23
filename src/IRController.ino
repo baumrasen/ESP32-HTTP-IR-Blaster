@@ -5,7 +5,7 @@
 #include <IRrecv.h>
 #include <IRutils.h>
 #include <WiFi.h>
-#include <WiFiManager.h>                                      // https://github.com/tzapu/WiFiManager WiFi Configuration Magic
+// #include <WiFiManager.h>                                      // https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 
 #include <ArduinoJson.h>
 #include <AsyncTCP.h>
@@ -22,6 +22,14 @@
 
 // User settings are below here
 //+=============================================================================
+// --- DEINE WIFI DATEN ---
+const char* ssid = "YOURSSID";
+const char* password = "YOURPWD";
+
+const char* custom_hostname = "YOURHOSTNAME";
+const char* custom_passcode = "YOURPSSCODE";
+const char* custom_port = "80";
+
 const bool getExternalIP = true;                               // Set to false to disable querying external IP
 
 const bool getTime = true;                                     // Set to false to disable querying for the time
@@ -442,17 +450,17 @@ void disableLed()
 }
 
 
-//+=============================================================================
-// Gets called when WiFiManager enters configuration mode
-//
-void configModeCallback (WiFiManager *myWiFiManager) {
-  Serial.println("Entered config mode");
-  Serial.println(WiFi.softAPIP());
-  //if you used auto generated SSID, print it
-  Serial.println(myWiFiManager->getConfigPortalSSID());
-  //entered config mode, make led toggle faster
-  ticker.attach(0.2, tick);
-}
+// //+=============================================================================
+// // Gets called when WiFiManager enters configuration mode
+// //
+// void configModeCallback (WiFiManager *myWiFiManager) {
+//   Serial.println("Entered config mode");
+//   Serial.println(WiFi.softAPIP());
+//   //if you used auto generated SSID, print it
+//   Serial.println(myWiFiManager->getConfigPortalSSID());
+//   //entered config mode, make led toggle faster
+//   ticker.attach(0.2, tick);
+// }
 
 
 // Callback function for WiFi events
@@ -485,94 +493,97 @@ bool setupWifi(bool resetConf) {
   
   WiFi.mode(WIFI_STA); // To make sure STA mode is preserved by WiFiManager and resets it after config is done.
   
-  // WiFiManager
-  // Local intialization. Once its business is done, there is no need to keep it around
-  WiFiManager wifiManager;
+  // // WiFiManager
+  // // Local intialization. Once its business is done, there is no need to keep it around
+  // WiFiManager wifiManager;
 
-  // set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
-  wifiManager.setAPCallback(configModeCallback);
-  // set config save notify callback
-  wifiManager.setSaveConfigCallback(saveConfigCallback);
+  // // set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
+  // wifiManager.setAPCallback(configModeCallback);
+  // // set config save notify callback
+  // wifiManager.setSaveConfigCallback(saveConfigCallback);
 
-  // Reset device if on config portal for greater than 3 minutes
-  wifiManager.setConfigPortalTimeout(180);
+  // // Reset device if on config portal for greater than 3 minutes
+  // wifiManager.setConfigPortalTimeout(180);
 
   if (LittleFS.begin(true)) {
     Serial.println("mounted file system");
-    if (LittleFS.exists("/config.json")) {
-      //file exists, reading and loading
-      Serial.println("reading config file");
-      File configFile = LittleFS.open("/config.json", "r");
-      if (configFile) {
-        Serial.println("opened config file");
-        size_t size = configFile.size();
-        // Allocate a buffer to store contents of the file.
-        std::unique_ptr<char[]> buf(new char[size]);
+    // if (LittleFS.exists("/config.json")) {
+    //   //file exists, reading and loading
+    //   Serial.println("reading config file");
+    //   File configFile = LittleFS.open("/config.json", "r");
+    //   if (configFile) {
+    //     Serial.println("opened config file");
+    //     size_t size = configFile.size();
+    //     // Allocate a buffer to store contents of the file.
+    //     std::unique_ptr<char[]> buf(new char[size]);
 
-        configFile.readBytes(buf.get(), size);
-        DynamicJsonDocument json(1024);
-        DeserializationError error = deserializeJson(json, buf.get());
-        serializeJson(json, Serial);
-        if (!error) {
-          Serial.println("\nparsed json");
+    //     configFile.readBytes(buf.get(), size);
+    //     DynamicJsonDocument json(1024);
+    //     DeserializationError error = deserializeJson(json, buf.get());
+    //     serializeJson(json, Serial);
+    //     if (!error) {
+    //       Serial.println("\nparsed json");
 
-          if (json.containsKey("hostname")) strncpy(host_name, json["hostname"], 20);
-          if (json.containsKey("passcode")) strncpy(passcode, json["passcode"], 20);
-          if (json.containsKey("port_str")) {
-            strncpy(port_str, json["port_str"], 6);
-            port = atoi(json["port_str"]);
-          }
-          if (json.containsKey("ip")) strncpy(static_ip, json["ip"], 16);
-          if (json.containsKey("gw")) strncpy(static_gw, json["gw"], 16);
-          if (json.containsKey("sn")) strncpy(static_sn, json["sn"], 16);
-          if (json.containsKey("dns")) strncpy(static_dns, json["dns"], 16);
-        } else {
-          Serial.println("failed to load json config");
-        }
-      }
-    }
+    //       if (json.containsKey("hostname")) strncpy(host_name, json["hostname"], 20);
+    //       if (json.containsKey("passcode")) strncpy(passcode, json["passcode"], 20);
+    //       if (json.containsKey("port_str")) {
+    //         strncpy(port_str, json["port_str"], 6);
+    //         port = atoi(json["port_str"]);
+    //       }
+    //       if (json.containsKey("ip")) strncpy(static_ip, json["ip"], 16);
+    //       if (json.containsKey("gw")) strncpy(static_gw, json["gw"], 16);
+    //       if (json.containsKey("sn")) strncpy(static_sn, json["sn"], 16);
+    //       if (json.containsKey("dns")) strncpy(static_dns, json["dns"], 16);
+    //     } else {
+    //       Serial.println("failed to load json config");
+    //     }
+    //   }
+    // }
   } else {
     Serial.println("failed to mount FS");
   }
 
-  WiFiManagerParameter custom_hostname("hostname", "Choose a hostname to this IR Controller", host_name, 20);
-  wifiManager.addParameter(&custom_hostname);
-  WiFiManagerParameter custom_passcode("passcode", "Choose a passcode", passcode, 20);
-  wifiManager.addParameter(&custom_passcode);
-  WiFiManagerParameter custom_port("port_str", "Choose a port", port_str, 6);
-  wifiManager.addParameter(&custom_port);
+  // WiFiManagerParameter custom_hostname("hostname", "Choose a hostname to this IR Controller", host_name, 20);
+  // wifiManager.addParameter(&custom_hostname);
+  // WiFiManagerParameter custom_passcode("passcode", "Choose a passcode", passcode, 20);
+  // wifiManager.addParameter(&custom_passcode);
+  // WiFiManagerParameter custom_port("port_str", "Choose a port", port_str, 6);
+  // wifiManager.addParameter(&custom_port);
 
-  wifiManager.setShowStaticFields(true);
-  wifiManager.setShowDnsFields(true);
+  // wifiManager.setShowStaticFields(true);
+  // wifiManager.setShowDnsFields(true);
 
-  IPAddress sip, sgw, ssn, dns;
-  sip.fromString(static_ip);
-  sgw.fromString(static_gw);
-  ssn.fromString(static_sn);
-  dns.fromString(static_dns);
+  // IPAddress sip, sgw, ssn, dns;
+  // sip.fromString(static_ip);
+  // sgw.fromString(static_gw);
+  // ssn.fromString(static_sn);
+  // dns.fromString(static_dns);
 
-  if (resetConf) {
-    Serial.println("Reset triggered, launching in AP mode");
-    wifiManager.startConfigPortal(wifi_config_name);
-  } else {
-    Serial.println("Setting static WiFi data from config");
-    wifiManager.setSTAStaticIPConfig(sip, sgw, ssn, dns);
-  }
+  // if (resetConf) {
+  //   Serial.println("Reset triggered, launching in AP mode");
+  //   wifiManager.startConfigPortal(wifi_config_name);
+  // } else {
+  //   Serial.println("Setting static WiFi data from config");
+  //   wifiManager.setSTAStaticIPConfig(sip, sgw, ssn, dns);
+  // }
 
   // fetches ssid and pass and tries to connect
   // if it does not connect it starts an access point with the specified name
   // and goes into a blocking loop awaiting configuration
-  if (!wifiManager.autoConnect(wifi_config_name)) {
-    Serial.println("Failed to connect and hit timeout");
-    // reset and try again, or maybe put it to deep sleep
-    ESP.restart();
-    delay(1000);
-  }
+  // if (!wifiManager.autoConnect(wifi_config_name)) {
+  //   Serial.println("Failed to connect and hit timeout");
+  //   // reset and try again, or maybe put it to deep sleep
+  //   ESP.restart();
+  //   delay(1000);
+  // }
 
   // if you get here you have connected to the WiFi
-  strncpy(host_name, custom_hostname.getValue(), 20);
-  strncpy(passcode, custom_passcode.getValue(), 20);
-  strncpy(port_str, custom_port.getValue(), 6);
+  // strncpy(host_name, custom_hostname.getValue(), 20);
+  // strncpy(passcode, custom_passcode.getValue(), 20);
+  // strncpy(port_str, custom_port.getValue(), 6);
+  strncpy(host_name, custom_hostname, 20);
+  strncpy(passcode, custom_passcode, 20);
+  strncpy(port_str, custom_port, 6);
   port = atoi(port_str);
 
   // --- NEUE PRÜFUNG ---
@@ -690,19 +701,24 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("            <input type='hidden' name='button_id' value='" + String(buttonId) + "'>\n");
 
   // --- Formularfelder ---
-  // Name
+  // --- KORREKTUR: Name ---
   response->print("            <div class='form-group'>\n");
-  response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
-  // --- KORREKTUR: Globale Funktion aufrufen ---
-  response->print("              <div class='col-sm-10'>" + generateTypeDropdownHtml(prefix + "type", String(buttonData.type)) + "</div>\n");
+  response->print("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n"); // Korrektes Label/for
+  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label' value='" + String(buttonData.name) + "' required></div>\n"); // Korrektes Input-Feld
   response->print("            </div>\n");
 
-  // Type
+  // --- KORREKTUR: Type ---
   response->print("            <div class='form-group'>\n");
-  response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
-  // --- KORREKTUR: Globale Funktion aufrufen ---
-  response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
+  response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n"); // Korrektes Label/for
+  response->print("              <div class='col-sm-10'>" + generateTypeDropdownHtml(prefix + "type", String(buttonData.type)) + "</div>\n"); // Korrekte Funktion
   response->print("            </div>\n");
+
+  // // Type
+  // response->print("            <div class='form-group'>\n");
+  // response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
+  // // --- KORREKTUR: Globale Funktion aufrufen ---
+  // response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
+  // response->print("            </div>\n");
 
   // Data
   response->print("            <div class='form-group'>\n");
@@ -728,11 +744,10 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "repeat' name='" + prefix + "repeat' value='" + String(buttonData.repeat) + "' min='1'></div>\n");
   response->print("            </div>\n");
 
-  // Output Pin
+  // --- KORREKTUR: Output Pin (Nur einmal) ---
   response->print("            <div class='form-group'>\n");
-  response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
-  // --- KORREKTUR: Globale Funktion aufrufen ---
-  response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
+  response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n"); // Korrektes Label/for
+  response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n"); // Korrekte Funktion
   response->print("            </div>\n");
 
   // --- Submit/Cancel/Test Buttons --- // Geändert
@@ -1339,6 +1354,24 @@ void setup() {
   Serial.println(digitalRead(configpin));
   if (!setupWifi(digitalRead(configpin) == LOW))
     return;
+
+  // NEU: Einfache WiFi Verbindung (wie im Minimaltest)
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password); // Verwende die globalen ssid/password Variablen
+  Serial.print("Connecting to WiFi (direct)...");
+  unsigned long startMillis = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    if (millis() - startMillis > 20000) {
+        Serial.println("\nWiFi Connection Failed! Restarting...");
+        ESP.restart();
+    }
+  }
+  Serial.println("\nWiFi connected.");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+  // --- ENDE NEU ---
 
   Serial.println("WiFi configuration complete");
   Serial.printf("Free Heap after WiFi: %u\n", ESP.getFreeHeap()); // Speicher nach WiFi
