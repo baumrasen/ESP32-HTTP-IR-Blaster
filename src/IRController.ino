@@ -24,10 +24,7 @@
 // User settings are below here
 //+=============================================================================
 
-const bool getExternalIP = true;                               // Set to false to disable querying external IP
-
-const bool getTime = true;                                     // Set to false to disable querying for the time
-const int timeZone = +2;                                       // Timezone (-5 is EST)
+const bool getExternalIP = false;                               // Set to false to disable querying external IP
 
 const unsigned int captureBufSize = 1024;                      // Size of the IR capture buffer.
 
@@ -76,11 +73,6 @@ IRsend irsend3(pins3);
 IRsend irsend4(pins4);
 
 const unsigned long resetfrequency = 259200000;                // 72 hours in milliseconds for external IP reset
-static const char ntpServerName[] = "time.google.com";
-unsigned int localPort = 8888;                                 // Local port to listen for UDP packets
-void sendNTPpacket(IPAddress &address);
-time_t getNtpTime();
-WiFiUDP ntpUDP;
 
 bool _rc5toggle = false;
 bool _rc6toggle = false;
@@ -90,7 +82,6 @@ char _ip[16] = "";
 unsigned long lastupdate = 0;
 
 bool externalIPError = false;
-bool ntpError = false;
 
 class Code {
   public:
@@ -214,16 +205,24 @@ void saveConfigCallback () {
 void loadButtonConfig() {
   buttonConfigs.clear(); // Vector vor dem Laden leeren
   
-  if (!LittleFS.begin()) {
-    Serial.println("Failed to mount LittleFS for button config loading.");
-    return;
-  }
+  // --- ENTFERNT ---
+  // if (!LittleFS.begin()) {
+  //   Serial.println("Failed to mount LittleFS for button config loading.");
+  //   return;
+  // }
+  // --- ENDE ENTFERNT ---
+
+  // Optional: Prüfen, ob das Root-Verzeichnis existiert (Indikator für gemountetes FS)
+  if (!LittleFS.exists("/")) {
+    Serial.println("ERROR in loadButtonConfig: LittleFS root directory not found (FS likely not mounted).");
+    return; // Funktion verlassen, da FS nicht verfügbar ist
+ }
 
   if (LittleFS.exists("/buttons.json")) {
     Serial.println("Reading button config file");
     File configFile = LittleFS.open("/buttons.json", "r");
     if (configFile) {
-      DynamicJsonDocument jsonDoc(1536); // Größe ggf. anpassen (9 Buttons * ~150 Zeichen)
+      DynamicJsonDocument jsonDoc(8192); // Größe ggf. anpassen (9 Buttons * ~150 Zeichen)
       DeserializationError error = deserializeJson(jsonDoc, configFile);
       configFile.close(); // Datei schließen, sobald gelesen
 
@@ -292,12 +291,19 @@ void loadButtonConfig() {
 }
 
 void saveButtonConfig() {
-  Serial.println("    ==> saveButtonConfig: Entered function."); // NEU
-  if (!LittleFS.begin()) {
-    Serial.println("        ERROR: Failed to mount LittleFS!"); // NEU
-    return;
-  }
-  Serial.println("        LittleFS mounted."); // NEU
+  // --- ENTFERNT ---
+  // if (!LittleFS.begin()) {
+  //   Serial.println("        ERROR: Failed to mount LittleFS!");
+  //   return;
+  // }
+  // Serial.println("        LittleFS mounted."); // Auch entfernen
+  // --- ENDE ENTFERNT ---
+
+  // Optional: Prüfen, ob das Root-Verzeichnis existiert
+  if (!LittleFS.exists("/")) {
+    Serial.println("        ERROR in saveButtonConfig: LittleFS root directory not found (FS likely not mounted).");
+    return; // Funktion verlassen
+ }
 
   DynamicJsonDocument jsonDoc(2048);
   JsonArray buttonArray = jsonDoc.to<JsonArray>();
@@ -376,19 +382,6 @@ bool validUID(char* user_id) {
       return false;
     }
     return true;
-}
-
-
-//+=============================================================================
-// Valid EPOCH time retrieval
-//
-bool validEPOCH(time_t timenow) {
-  if (timenow < 922838400) {
-    Serial.println("Epoch time from timeServer is unexpectedly old, probably failed connection to the time server. Check your network settings");
-    Serial.println(timenow);
-    return false;
-  }
-  return true;
 }
 
 
@@ -706,6 +699,298 @@ WiFi.onEvent(WiFiEvent);
   // keep LED on
   digitalWrite(ledpin, LOW);
   return true;
+}
+
+
+void flushStep(String step, File jsf, size_t wc) {
+
+  // --- Zusätzlicher Check ---
+size_t currentSize = jsf.size();
+int currentError = jsf.getWriteError();
+Serial.printf("  Checkpoint 1: Size before flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
+jsf.flush(); // Versuch, hier schon zu flushen
+delay(50); // <-- NEU: Kleine Verzögerung (z.B. 50ms) hinzufügen
+currentSize = jsf.size();
+currentError = jsf.getWriteError();
+Serial.printf("  Checkpoint 1: Size after flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
+if (currentSize == 0 && wc > 0) { // written_chunk vom ersten print
+    Serial.println("  !!! ERROR DETECTED: Size reset to 0 after Checkpoint 1 flush!");
+    // Hier könnte man ggf. abbrechen
+}
+
+}
+
+// Füge diese neue Funktion irgendwo vor setup() ein
+
+void generateAndWriteJavaScript() {
+  Serial.printf("  Heap before JS write: %u\n", ESP.getFreeHeap());
+  Serial.println("Generating and writing JavaScript to LittleFS (/js/scripts.js)...");
+
+  // Stelle sicher, dass das /js Verzeichnis existiert
+  if (!LittleFS.exists("/js")) {
+    if (LittleFS.mkdir("/js")) {
+      Serial.println("Created /js directory.");
+      delay(50); // <-- NEU: Kleine Verzögerung (z.B. 50ms) hinzufügen
+    } else {
+      Serial.println("ERROR: Failed to create /js directory!");
+      // Fehlerbehandlung? Hier könnte man anhalten oder weitermachen und hoffen.
+    }
+  } else {
+    Serial.println("/js directory already exists.");
+  }
+
+  File jsFile = LittleFS.open("/js/scripts.js", "w");
+
+  // --- NEU: Verbesserte Prüfung nach open ---
+  if (!jsFile || jsFile.isDirectory()) { // Prüfen, ob es eine gültige Datei zum Schreiben ist
+    Serial.println("ERROR: Failed to open /js/scripts.js for writing (invalid file handle or directory)!");
+    if (jsFile) jsFile.close(); // Schließen, falls es ein Verzeichnis war
+    return; // Funktion abbrechen
+  }
+  // --- ENDE NEU ---
+  Serial.println("  File /js/scripts.js opened for writing."); // Bestätigung hinzufügen
+
+  size_t written_chunk = jsFile.print(F("/* --- Helper Functions --- */\n")); // Beispiel
+  Serial.printf("  Bytes written by first print: %d\n", written_chunk);
+  if (written_chunk == 0) {
+    Serial.println("  !!! WARNING: First jsFile.print() returned 0 bytes!");
+  }
+
+  // --- Schreibe den JavaScript-Code in die Datei ---
+  // ... (alle jsFile.print() Aufrufe bleiben unverändert) ...
+
+  // --- Schreibe den JavaScript-Code in die Datei ---
+  // Wichtig: Verwende jsFile.print() oder jsFile.println()
+
+  // 1. Helper-Funktion: setButtonState
+  jsFile.print("function setButtonState(button, state, resetDelay = 750) {\n");
+  jsFile.print("  if (!button) return;\n");
+  jsFile.print("  button.classList.remove('btn-warning', 'btn-success', 'btn-danger');\n");
+  jsFile.print("  button.disabled = (state === 'sending');\n");
+  jsFile.print("  if (state === 'sending') button.classList.add('btn-warning');\n");
+  jsFile.print("  if (state === 'success') button.classList.add('btn-success');\n");
+  jsFile.print("  if (state === 'error') button.classList.add('btn-danger');\n");
+  jsFile.print("  if (state === 'success' || state === 'error') {\n");
+  jsFile.print("    setTimeout(() => {\n");
+  jsFile.print("      button.classList.remove('btn-success', 'btn-danger');\n");
+  jsFile.print("      button.disabled = false;\n");
+  jsFile.print("    }, resetDelay);\n");
+  jsFile.print("  } else if (state === 'reset') {\n");
+  jsFile.print("     button.disabled = false;\n");
+  jsFile.print("  }\n");
+  jsFile.print("}\n\n");
+
+  flushStep("Step 1 ready", jsFile, written_chunk);
+
+  // 2. Helper-Funktion: toggleButtonFields + Initialisierung
+  // (Diese wird nur auf den Button-Config-Seiten benötigt, könnte also
+  //  auch separat generiert/geladen werden, aber der Einfachheit halber hier)
+  jsFile.print("function toggleButtonFields(isMacro) {\n");
+  jsFile.print("  const singleFields = document.getElementById('single-ir-fields');\n");
+  jsFile.print("  const macroField = document.getElementById('macro-json-field');\n");
+  jsFile.print("  const requiredSingleIds = ['btn_type', 'btn_data', 'btn_length'];\n");
+  jsFile.print("  const requiredMacroIds = ['btn_macroJson'];\n");
+  jsFile.print("  if (isMacro) {\n");
+  jsFile.print("    if (singleFields) singleFields.style.display = 'none';\n");
+  jsFile.print("    if (macroField) macroField.style.display = 'block';\n");
+  jsFile.print("    requiredSingleIds.forEach(id => { const el = document.getElementById(id); if (el) el.required = false; });\n");
+  jsFile.print("    requiredMacroIds.forEach(id => { const el = document.getElementById(id); if (el) el.required = true; });\n");
+  jsFile.print("  } else {\n");
+  jsFile.print("    if (singleFields) singleFields.style.display = 'block';\n");
+  jsFile.print("    if (macroField) macroField.style.display = 'none';\n");
+  jsFile.print("    requiredSingleIds.forEach(id => { const el = document.getElementById(id); if (el) el.required = true; });\n");
+  jsFile.print("    requiredMacroIds.forEach(id => { const el = document.getElementById(id); if (el) el.required = false; });\n");
+  jsFile.print("  }\n");
+  jsFile.print("}\n\n");
+
+  flushStep("Step 2 ready", jsFile, written_chunk);
+
+  // 3. SSE Handler
+  jsFile.print("/* --- SSE Logic --- */\n");
+  jsFile.print("console.log('Setting up EventSource...');\n");
+  jsFile.print("const evtSource = new EventSource('/events');\n");
+  jsFile.print("const MAX_TABLE_ROWS = 5;\n");
+  jsFile.print("function addTableRow(tableBodyId, codeData, isSentTable) {\n");
+  jsFile.print("  const tableBody = document.getElementById(tableBodyId);\n");
+  jsFile.print("  if (!tableBody) return;\n");
+  jsFile.print("  const placeholderId = isSentTable ? 'no-sent-codes' : 'no-received-codes';\n");
+  jsFile.print("  const placeholderRow = document.getElementById(placeholderId);\n");
+  jsFile.print("  if (placeholderRow) placeholderRow.remove();\n");
+  jsFile.print("  let newRowHtml = `<tr class='text-uppercase'>`;\n");
+  jsFile.print("  newRowHtml += `<td>${codeData.timestamp}</td>`;\n");
+  jsFile.print("  newRowHtml += `<td><code>${codeData.data}</code></td>`;\n");
+  jsFile.print("  newRowHtml += `<td><code>${codeData.encoding}</code></td>`;\n");
+  jsFile.print("  newRowHtml += `<td><code>${codeData.bits}</code></td>`;\n");
+  jsFile.print("  newRowHtml += `<td><code>${codeData.address || '-'}</code></td>`;\n");
+  jsFile.print("  if (isSentTable) {\n");
+  jsFile.print("    newRowHtml += `<td><code>${codeData.repeat}</code></td>`;\n");
+  jsFile.print("    newRowHtml += `<td><code>${codeData.out}</code></td>`;\n");
+  jsFile.print("  }\n");
+  jsFile.print("  newRowHtml += `</tr>`;\n");
+  jsFile.print("  tableBody.insertAdjacentHTML('afterbegin', newRowHtml);\n");
+  jsFile.print("  while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
+  jsFile.print("    tableBody.deleteRow(-1);\n");
+  jsFile.print("  }\n");
+  jsFile.print("}\n");
+  jsFile.print("evtSource.addEventListener('codeSent', function(event) {\n");
+  jsFile.print("  console.log('SSE codeSent:', event.data);\n");
+  jsFile.print("  try { const codeData = JSON.parse(event.data); addTableRow('sent-codes-body', codeData, true); } catch (e) { console.error('Error parsing codeSent data:', e); }\n");
+  jsFile.print("});\n");
+  jsFile.print("evtSource.addEventListener('codeReceived', function(event) {\n");
+  jsFile.print("  console.log('SSE codeReceived:', event.data);\n");
+  jsFile.print("  try { const codeData = JSON.parse(event.data); addTableRow('received-codes-body', codeData, false); } catch (e) { console.error('Error parsing codeReceived data:', e); }\n");
+  jsFile.print("});\n");
+  jsFile.print("evtSource.onerror = function(err) { console.error('EventSource failed:', err); };\n\n");
+
+  flushStep("Step 3 ready", jsFile, written_chunk);
+
+  // // 4. DOMContentLoaded Wrapper für DOM-Interaktionen
+  // jsFile.print("/* --- DOM Ready Initializations & Listeners --- */\n");
+  // jsFile.print("document.addEventListener('DOMContentLoaded', function() {\n\n"); // <-- WIEDER HINZUGEFÜGT
+
+  // 3. Event Listener und Initialisierungen (JETZT GLOBAL)
+  jsFile.print("/* --- Initializations & Listeners --- */\n"); // Angepasster Kommentar
+
+  // 4a. Remote Button Handler
+  jsFile.print("  /* Remote Button Handler */\n");
+  jsFile.print("  console.log('Attempting to find #remote-buttons...');\n"); // <-- NEU
+  jsFile.print("  const remoteButtonsContainer = document.getElementById('remote-buttons');\n");
+    // --- NEUE DEBUG-ZEILE ---
+    jsFile.print("  console.log('Value of remoteButtonsContainer:', remoteButtonsContainer);\n");
+    // --- ENDE NEUE DEBUG-ZEILE ---
+  jsFile.print("  if (remoteButtonsContainer) {\n");
+  jsFile.print("    console.log('#remote-buttons found. Attaching listener...');\n"); // <-- NEU
+  jsFile.print("    remoteButtonsContainer.addEventListener('click', function(event) {\n");
+  jsFile.print("      console.log('Click detected inside container.');\n"); // <-- NEU
+  jsFile.print("      if (event.target.classList.contains('remote-button')) {\n");
+  jsFile.print("        event.preventDefault();\n");
+  jsFile.print("        const button = event.target;\n");
+  jsFile.print("        const isMacro = button.dataset.ismacro === 'true';\n");
+  jsFile.print("        const buttonId = button.id;\n");
+  jsFile.print("        console.log('Button clicked:', button.textContent, 'Is Macro:', isMacro, 'ID:', buttonId);\n");
+  jsFile.print("        if (typeof setButtonState !== 'function') { console.error('setButtonState missing!'); alert('Internal Error'); return; }\n");
+  jsFile.print("        setButtonState(button, 'sending');\n");
+  jsFile.print("        if (isMacro) {\n");
+  jsFile.print("          if (typeof buttonMacroDataStore === 'undefined' || !buttonMacroDataStore.hasOwnProperty(buttonId)) { console.error('Macro data missing for', buttonId); setButtonState(button, 'error'); alert('Error: Macro data missing.'); return; }\n");
+  jsFile.print("          const macroJsonString = buttonMacroDataStore[buttonId];\n");
+  jsFile.print("          console.log('Sending Macro JSON:', macroJsonString);\n");
+  jsFile.print("          const formData = new URLSearchParams(); formData.append('plain', macroJsonString);\n");
+  jsFile.print("          fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
+  jsFile.print("          .then(response => { setButtonState(button, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Macro POST Error:', response.status); else console.log('Macro OK'); return response.text(); })\n");
+  jsFile.print("          .then(data => console.log('Server response macro:', data))\n");
+  jsFile.print("          .catch(error => { console.error('Fetch error macro:', error); setButtonState(button, 'error'); alert('Network Error (Macro).'); });\n");
+  jsFile.print("        } else {\n");
+  jsFile.print("          const irData = { type: button.dataset.type, data: button.dataset.data, length: parseInt(button.dataset.length, 10), address: button.dataset.address, repeat: parseInt(button.dataset.repeat, 10), out: parseInt(button.dataset.out, 10) };\n");
+  jsFile.print("          console.log('Sending Single IR:', irData);\n");
+  jsFile.print("          if (!irData.type || !irData.data || !irData.length || irData.length <= 0) { console.error('Invalid data attributes:', buttonId, irData); setButtonState(button, 'error'); alert('Error: Invalid button data.'); return; }\n");
+  jsFile.print("          const urlParams = new URLSearchParams(irData).toString();\n");
+  jsFile.print("          fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
+  jsFile.print("          .then(response => { setButtonState(button, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Single IR GET Error:', response.status); else console.log('Single IR OK'); return response.text(); })\n");
+  jsFile.print("          .then(data => console.log('Server response single IR:', data))\n");
+  jsFile.print("          .catch(error => { console.error('Fetch error single IR:', error); setButtonState(button, 'error'); alert('Network Error (Single IR).'); });\n");
+  jsFile.print("        }\n"); // end else (isMacro)
+  jsFile.print("      }\n"); // end if (event.target.classList.contains...)
+  jsFile.print("    });\n"); // end addEventListener
+  jsFile.print("  }\n\n"); // end if (remoteButtonsContainer)
+
+  flushStep("Step 4a ready", jsFile, written_chunk); 
+
+  // 4b. Test Send Button Handler
+  jsFile.print("  /* Test Send Button Handler */\n");
+  jsFile.print("  const testSendButton = document.getElementById('test-send-button');\n");
+  jsFile.print("  if (testSendButton) {\n");
+  jsFile.print("    const originalTestButtonText = testSendButton.textContent;\n");
+  jsFile.print("    testSendButton.addEventListener('click', function(event) {\n");
+  jsFile.print("      console.log('Test Send button clicked.');\n");
+  jsFile.print("      const prefix = 'btn_'; let irData = {}; let macroJsonString = ''; let isMacroTest = false;\n");
+  jsFile.print("      try {\n");
+  jsFile.print("        isMacroTest = document.querySelector('input[name=\"btn_isMacro\"]:checked').value === '1';\n");
+  jsFile.print("        if (isMacroTest) {\n");
+  jsFile.print("          macroJsonString = document.getElementById(prefix + 'macroJson').value;\n");
+  jsFile.print("          JSON.parse(macroJsonString);\n");
+  jsFile.print("        } else {\n");
+  jsFile.print("          irData.type = document.getElementById(prefix + 'type').value; irData.data = document.getElementById(prefix + 'data').value; irData.length = parseInt(document.getElementById(prefix + 'length').value, 10); irData.address = document.getElementById(prefix + 'address').value; irData.repeat = parseInt(document.getElementById(prefix + 'repeat').value, 10); irData.out = parseInt(document.getElementById(prefix + 'out').value, 10);\n");
+  jsFile.print("          if (!irData.type || !irData.data || !irData.length || irData.length <= 0) throw new Error('Missing Type, Data, or valid Length for Single IR.');\n");
+  jsFile.print("          if (!irData.repeat || irData.repeat <= 0) irData.repeat = 1;\n");
+  jsFile.print("          if (!irData.out || irData.out <= 0 || irData.out > 4) irData.out = 1;\n");
+  jsFile.print("        }\n");
+  jsFile.print("      } catch (e) { console.error('Error reading/validating form:', e); alert('Error: ' + e.message); return; }\n");
+  jsFile.print("      testSendButton.textContent = 'Sending...'; setButtonState(testSendButton, 'sending');\n");
+  jsFile.print("      if (isMacroTest) {\n");
+  jsFile.print("        console.log('Sending Test Macro JSON:', macroJsonString);\n");
+  jsFile.print("        const formData = new URLSearchParams(); formData.append('plain', macroJsonString);\n");
+  jsFile.print("        fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
+  jsFile.print("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); alert(response.ok ? 'Test Macro OK!' : 'Error sending test macro.'); if (!response.ok) console.error('Test Macro POST Error:', response.status); return response.text(); })\n");
+  jsFile.print("        .then(data => console.log('Server response test macro:', data))\n");
+  jsFile.print("        .catch(error => { console.error('Fetch error test macro:', error); setButtonState(testSendButton, 'error'); alert('Network Error (Test Macro).'); })\n");
+  jsFile.print("        .finally(() => { testSendButton.textContent = originalTestButtonText; });\n");
+  jsFile.print("      } else {\n");
+  jsFile.print("        console.log('Sending Test Single IR:', irData);\n");
+  jsFile.print("        const urlParams = new URLSearchParams(irData).toString();\n");
+  jsFile.print("        fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
+  jsFile.print("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); alert(response.ok ? 'Test Single IR OK!' : 'Error sending test command.'); if (!response.ok) console.error('Test Single IR GET Error:', response.status); return response.text(); })\n");
+  jsFile.print("        .then(data => console.log('Server response test single IR:', data))\n");
+  jsFile.print("        .catch(error => { console.error('Fetch error test single IR:', error); setButtonState(testSendButton, 'error'); alert('Network Error (Test Single IR).'); })\n");
+  jsFile.print("        .finally(() => { testSendButton.textContent = originalTestButtonText; });\n");
+  jsFile.print("      }\n"); // end else (isMacroTest)
+  jsFile.print("    });\n"); // end addEventListener
+  jsFile.print("  }\n\n"); // end if (testSendButton)
+
+  flushStep("Step 4b ready", jsFile, written_chunk);
+
+  // 4c. Initialisierung für toggleButtonFields (falls vorhanden)
+  jsFile.print("  /* Initial Button Form Toggle */\n");
+  jsFile.print("  const macroRadio = document.querySelector('input[name=\"btn_isMacro\"][value=\"1\"]');\n");
+  jsFile.print("  if (macroRadio) {\n");
+  jsFile.print("    if (macroRadio.checked) { toggleButtonFields(true); }\n");
+  jsFile.print("    else { const singleRadio = document.querySelector('input[name=\"btn_isMacro\"][value=\"0\"]'); if (singleRadio && singleRadio.checked) { toggleButtonFields(false); } else { toggleButtonFields(false); } }\n");
+  jsFile.print("  }\n\n");
+
+  // jsFile.print("});\n"); // <-- WIEDER HINZUGEFÜGT (Ende DOMContentLoaded Wrapper)
+
+
+    // --- Datei schließen und Erfolg/Fehler prüfen ---
+    int writeError = jsFile.getWriteError(); // Fehlerstatus holen VOR dem Schließen
+    size_t bytesWritten = jsFile.size();     // Größe holen VOR dem Schließen
+    Serial.printf("  Flushing file before close...\n"); // NEU
+    jsFile.flush();
+    jsFile.close();                          // Datei schließen
+
+  
+    Serial.printf("  Finished writing attempts. Bytes reported before close: %d, Write Error Code: %d\n", bytesWritten, writeError); // Mehr Debugging
+
+    // --- NEU: Verbesserte Erfolgsprüfung ---
+  if (writeError == 0 && bytesWritten > 0) {
+    Serial.printf("Successfully wrote %d bytes to /js/scripts.js\n", bytesWritten);
+    // Optional: Datei nach dem Schließen erneut öffnen und Größe prüfen
+    File checkFile = LittleFS.open("/js/scripts.js", "r");
+    if (checkFile) {
+        Serial.printf("  Verification: File size after close/reopen: %d\n", checkFile.size());
+        checkFile.close();
+    } else {
+        Serial.println("  Verification ERROR: Could not reopen file for size check!");
+    }
+  } else {
+    Serial.println("ERROR writing to /js/scripts.js!");
+    if (writeError != 0) {
+        Serial.printf("  Write Error Code: %d\n", writeError);
+    }
+    if (bytesWritten == 0) {
+        Serial.println("  Reason: File size reported as 0 before closing.");
+    }
+    // Versuch, die Datei zu löschen, falls sie fehlerhaft ist
+    if (LittleFS.exists("/js/scripts.js")) {
+        if (LittleFS.remove("/js/scripts.js")) {
+            Serial.println("  Attempted to remove potentially corrupted file.");
+        } else {
+            Serial.println("  ERROR: Failed to remove potentially corrupted file.");
+        }
+    }
+  }
+  // --- ENDE NEU ---
+
+  Serial.printf("  Heap after JS write: %u\n", ESP.getFreeHeap());
+
 }
 
 
@@ -1577,7 +1862,36 @@ void setup() {
     */
   // --- ENDE TEMPORÄRER CODE ---
 
-  loadButtonConfig(); // Lade die Button-Konfigurationen
+  // --- TEMPORÄRER CODE ZUM FORMATIEREN ---
+// Diesen Block einkommentieren, EINMAL flashen & laufen lassen,
+// dann ESP manuell stoppen, Block wieder auskommentieren und erneut flashen!
+/* 
+Serial.println("Attempting to unmount and format LittleFS... THIS WILL ERASE ALL SAVED DATA!");
+LittleFS.end(); // Sicherstellen, dass es unmounted ist
+delay(100);     // Kurze Pause
+bool formatted = LittleFS.format();
+if (formatted) {
+  Serial.println("LittleFS formatted successfully. Halting now. Please stop/reset manually.");
+  delay(1000); // Gib der Meldung Zeit
+  while(1) { delay(100); } // Anhalten
+} else {
+  Serial.println("!!! LittleFS format failed. Halting. !!!");
+  while(1) { delay(100); } // Anhalten, wenn Formatierung fehlschlägt
+}
+ */
+// --- ENDE TEMPORÄRER CODE ---
+
+  if (!LittleFS.begin(true)) { // Mount FS (true = format if mount failed)
+    Serial.println("LittleFS Mount Failed! Halting.");
+    while(1); // Anhalten, da JS nicht generiert werden kann
+  }
+  Serial.println("LittleFS Mounted.");
+
+  // --- NEU: JS generieren und schreiben ---
+  generateAndWriteJavaScript();
+  // --- ENDE NEU ---
+
+  loadButtonConfig(); // Lade Buttons NACHDEM FS gemountet ist
 
   // Set the hostname
   if (strlen(host_name) > 0) {
@@ -1647,6 +1961,38 @@ void setup() {
     // sendHomePage mit dem request-Objekt aufrufen
     sendHomePage(request); // 200 wird innerhalb von sendHomePage/sendHeader gesetzt
   });
+
+    // --- WICHTIG: JS Handler registrieren ---
+// --- ALT (Regex-Handler) ---
+/*
+server->on("^\\/js\\/(.+)$", HTTP_GET, [](AsyncWebServerRequest *request){
+  String filename = "/js/" + request->pathArg(0); // Verwendet Regex und pathArg
+  Serial.println("Request for JS file: " + filename);
+  if (LittleFS.exists(filename)) {
+    request->send(LittleFS, filename, "application/javascript");
+    Serial.println("Sent JS file: " + filename);
+  } else {
+    Serial.println("JS file not found: " + filename);
+    request->send(404, "text/plain", "Not Found");
+  }
+});
+*/
+
+// --- NEU (Statischer Handler für die spezifische Datei) ---
+server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
+  String filename = "/js/scripts.js"; // Der Dateiname ist jetzt fest
+  Serial.println("Request for specific JS file: " + filename); // Angepasste Log-Meldung
+
+  if (LittleFS.exists(filename)) {
+    // Datei existiert, sende sie mit korrektem Content-Type
+    request->send(LittleFS, filename, "application/javascript");
+    Serial.println("Sent JS file: " + filename);
+  } else {
+    // Datei nicht gefunden (sollte nach setup() nicht passieren, aber sicher ist sicher)
+    Serial.println("JS file not found: " + filename);
+    request->send(404, "text/plain", "Not Found");
+  }
+});
 
    // Configure the server
    server->on("/json", HTTP_POST, [](AsyncWebServerRequest *request) { // JSON handler
@@ -1985,17 +2331,6 @@ void setup() {
     server->begin();
   Serial.println("HTTP Server started on port " + String(port));
 
-  
-
-  Serial.println("Starting UDP");
-  ntpUDP.begin(localPort);
-  Serial.print("Local port: ");
-  Serial.println(localPort);
-  Serial.println("Waiting for sync");
-  setSyncProvider(getNtpTime);
-  setSyncInterval(300);
-  
-  // externalIP();
 
   irsend1.begin();
   irsend2.begin();
@@ -2035,69 +2370,6 @@ void setup() {
 
 }
 
-
-//+=============================================================================
-// NTP Code
-//
-const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
-byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
-
-time_t getNtpTime()
-{
-  IPAddress ntpServerIP; // NTP server's ip address
-
-  while (ntpUDP.parsePacket() > 0) ; // discard any previously received packets
-  Serial.println("Transmit NTP Request");
-  // get a random server from the pool
-  WiFi.hostByName(ntpServerName, ntpServerIP);
-  Serial.print(ntpServerName);
-  Serial.print(": ");
-  Serial.println(ntpServerIP);
-  sendNTPpacket(ntpServerIP);
-  uint32_t beginWait = millis();
-  while (millis() - beginWait < 1500) {
-    int size = ntpUDP.parsePacket();
-    if (size >= NTP_PACKET_SIZE) {
-      Serial.println("Receive NTP Response");
-      ntpUDP.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
-      unsigned long secsSince1900;
-      // convert four bytes starting at location 40 to a long integer
-      secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
-      secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
-      secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
-      secsSince1900 |= (unsigned long)packetBuffer[43];
-      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
-    }
-  }
-  Serial.println("No NTP Response :-(");
-  return 0; // return 0 if unable to get the time
-}
-
-
-//+=============================================================================
-// Send an NTP request to the time server at the given address
-//
-void sendNTPpacket(IPAddress &address)
-{
-  // set all bytes in the buffer to 0
-  memset(packetBuffer, 0, NTP_PACKET_SIZE);
-  // Initialize values needed to form NTP request
-  // (see URL above for details on the packets)
-  packetBuffer[0] = 0b11100011;   // LI, Version, Mode
-  packetBuffer[1] = 0;     // Stratum, or type of clock
-  packetBuffer[2] = 6;     // Polling Interval
-  packetBuffer[3] = 0xEC;  // Peer Clock Precision
-  // 8 bytes of zero for Root Delay & Root Dispersion
-  packetBuffer[12] = 49;
-  packetBuffer[13] = 0x4E;
-  packetBuffer[14] = 49;
-  packetBuffer[15] = 52;
-  // all NTP fields have been given values, now
-  // you can send a packet requesting a timestamp:
-  ntpUDP.beginPacket(address, 123); //NTP requests are to port 123
-  ntpUDP.write(packetBuffer, NTP_PACKET_SIZE);
-  ntpUDP.endPacket();
-}
 
 //+=============================================================================
 // Send command to local roku
@@ -2274,13 +2546,18 @@ void sendHeader(AsyncResponseStream *response) {
 //
 // Nimmt jetzt einen Zeiger auf den Response Stream entgegen
 void sendFooter(AsyncResponseStream *response) {
-  // --- Uptime and Epoch ---
-  String uptimeEpochLine = "      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime; EPOCH " + String(now() - (timeZone * SECS_PER_HOUR)) + "</em> / <em id='jepoch'></em> ( <em id='jdiff'></em> )</div></div>\n";
-  response->print(uptimeEpochLine);
-  response->print("      <script>document.getElementById('jepoch').innerHTML = Math.round((new Date()).getTime() / 1000)</script>");
-  response->print("      <script>document.getElementById('jdiff').innerHTML = Math.abs(Math.round((new Date()).getTime() / 1000) - " + String(now() - (timeZone * SECS_PER_HOUR)) + ")</script>");
+// --- Uptime and Epoch ---
+  // OLD Line that calls now():
+  // String uptimeEpochLine = "      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime; EPOCH " + String(now() - (timeZone * SECS_PER_HOUR)) + "</em> / <em id='jepoch'></em> ( <em id='jdiff'></em> )</div></div>\n";
 
-  yield(); // <-- ADD YIELD after initial scripts
+  // // NEW Line (without server-side now()):
+  // String uptimeEpochLine = "      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime</em> / Client Epoch: <em id='jepoch'></em> / Diff: <em id='jdiff'></em></div></div>\n";
+  // response->print(uptimeEpochLine);
+
+  // response->print("      <script>document.getElementById('jepoch').innerHTML = Math.round((new Date()).getTime() / 1000)</script>");
+  // response->print("      <script>document.getElementById('jdiff').innerHTML = Math.abs(Math.round((new Date()).getTime() / 1000) - " + String(now() - (timeZone * SECS_PER_HOUR)) + ")</script>");
+
+  // yield(); // <-- ADD YIELD after initial scripts
 
   // // +++ Speicherbelegung als Tabelle +++
   // response->print("      <div class='row'>\n");
@@ -2355,241 +2632,239 @@ void sendFooter(AsyncResponseStream *response) {
   // response->print("        </div>\n");
   // response->print("      </div>\n");
 
-  // --- Bestehende Fehler-/Statusmeldungen ---
-  time_t timenow = now() - (timeZone * SECS_PER_HOUR);
-  if (!validEPOCH(timenow))
-    response->print("      <div class='row'><div class='col-md-12'><em>Error - EPOCH time is inappropriately low...</em></div></div>\n");
-  if (ntpError)
-    response->print("      <div class='row'><div class='col-md-12'><em>Error - last attempt to connect to the NTP server failed...</em></div></div>\n");
-
-    yield(); // <-- ADD YIELD after initial scripts
-
-    // --- NEU: JavaScript für Server-Sent Events ---
-  response->print("      <script>\n");
-
-  // --- NEU: JavaScript zum Umschalten der Button-Formularfelder ---
-  response->print("        // Funktion zum Umschalten der Felder im Button-Formular\n");
-  response->print("        function toggleButtonFields(isMacro) {\n");
-  response->print("          const singleFields = document.getElementById('single-ir-fields');\n");
-  response->print("          const macroField = document.getElementById('macro-json-field');\n");
-  response->print("          const requiredSingleIds = ['btn_type', 'btn_data', 'btn_length']; // IDs der Pflichtfelder für Single IR\n");
-  response->print("          const requiredMacroIds = ['btn_macroJson']; // IDs der Pflichtfelder für Macro\n");
-  response->print("\n");
-  response->print("          if (isMacro) {\n");
-  response->print("            if (singleFields) singleFields.style.display = 'none';\n");
-  response->print("            if (macroField) macroField.style.display = 'block';\n");
-  response->print("            // Macro-Feld erforderlich machen, Single-Felder nicht\n");
-  response->print("            requiredSingleIds.forEach(id => {\n");
-  response->print("                const el = document.getElementById(id);\n");
-  response->print("                if (el) el.required = false;\n");
-  response->print("            });\n");
-  response->print("            requiredMacroIds.forEach(id => {\n");
-  response->print("                const el = document.getElementById(id);\n");
-  response->print("                if (el) el.required = true;\n");
-  response->print("            });\n");
-  response->print("          } else {\n");
-  response->print("            if (singleFields) singleFields.style.display = 'block';\n");
-  response->print("            if (macroField) macroField.style.display = 'none';\n");
-  response->print("            // Single-Felder erforderlich machen, Macro-Feld nicht\n");
-  response->print("            requiredSingleIds.forEach(id => {\n");
-  response->print("                const el = document.getElementById(id);\n");
-  response->print("                if (el) el.required = true;\n");
-  response->print("            });\n");
-  response->print("            requiredMacroIds.forEach(id => {\n");
-  response->print("                const el = document.getElementById(id);\n");
-  response->print("                if (el) el.required = false;\n");
-  response->print("            });\n");
-  response->print("          }\n");
-  response->print("        }\n");
-  response->print("\n");
-  response->print("        // Sicherstellen, dass die Felder beim Laden der Seite korrekt angezeigt werden\n");
-  response->print("        document.addEventListener('DOMContentLoaded', function() {\n");
-  response->print("            // Prüfen, ob wir auf einer Seite mit dem Button-Formular sind\n");
-  response->print("            const macroRadio = document.querySelector('input[name=\\\"btn_isMacro\\\"][value=\\\"1\\\"]');\n"); // Escaped quotes!
-  response->print("            if (macroRadio) { // Nur ausführen, wenn Radio-Button existiert\n");
-  response->print("              if (macroRadio.checked) {\n");
-  response->print("                  toggleButtonFields(true);\n");
-  response->print("              } else {\n");
-  response->print("                  // Sicherstellen, dass der andere Radio-Button existiert, bevor wir umschalten\n");
-  response->print("                  const singleRadio = document.querySelector('input[name=\\\"btn_isMacro\\\"][value=\\\"0\\\"]');\n"); // Escaped quotes!
-  response->print("                  if (singleRadio && singleRadio.checked) {\n");
-  response->print("                     toggleButtonFields(false);\n");
-  response->print("                  } else { \n");
-  response->print("                     // Fallback, falls keiner gecheckt ist (sollte nicht passieren, aber sicher ist sicher)\n");
-  response->print("                     toggleButtonFields(false);\n");
-  response->print("                  }\n");
-  response->print("              }\n");
-  response->print("            }\n");
-  response->print("        });\n");
-  // --- ENDE NEU ---
-
-  response->print("        console.log('Setting up EventSource...');\n");
-  response->print("        const evtSource = new EventSource('/events');\n");
-  response->print("        const MAX_TABLE_ROWS = 5; // Max Zeilen pro Tabelle\n");
-
-  response->print("        // Funktion zum Hinzufügen einer Zeile zu einer Tabelle\n");
-  response->print("        function addTableRow(tableBodyId, codeData, isSentTable) {\n");
-  response->print("          const tableBody = document.getElementById(tableBodyId);\n");
-  response->print("          if (!tableBody) return;\n");
-
-  response->print("          // Platzhalter entfernen, falls vorhanden\n");
-  response->print("          const placeholderId = isSentTable ? 'no-sent-codes' : 'no-received-codes';\n");
-  response->print("          const placeholderRow = document.getElementById(placeholderId);\n");
-  response->print("          if (placeholderRow) placeholderRow.remove();\n");
-
-  response->print("          // Neue Zeile erstellen\n");
-  response->print("          let newRowHtml = `<tr class='text-uppercase'>`;\n");
-  response->print("          newRowHtml += `<td>${codeData.timestamp}</td>`;\n");
-  response->print("          newRowHtml += `<td><code>${codeData.data}</code></td>`;\n");
-  response->print("          newRowHtml += `<td><code>${codeData.encoding}</code></td>`;\n");
-  response->print("          newRowHtml += `<td><code>${codeData.bits}</code></td>`;\n");
-  response->print("          newRowHtml += `<td><code>${codeData.address || '-'}</code></td>`;\n");
-  response->print("          if (isSentTable) {\n"); // Zusätzliche Spalten für 'Sent' Tabelle
-  response->print("            newRowHtml += `<td><code>${codeData.repeat}</code></td>`;\n");
-  response->print("            newRowHtml += `<td><code>${codeData.out}</code></td>`;\n");
-  response->print("          }\n");
-  response->print("          newRowHtml += `</tr>`;\n");
-
-  response->print("          // Zeile am Anfang einfügen\n");
-  response->print("          tableBody.insertAdjacentHTML('afterbegin', newRowHtml);\n");
-
-  response->print("          // Alte Zeilen entfernen, wenn Limit überschritten\n");
-  response->print("          while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
-  response->print("            tableBody.deleteRow(-1); // Letzte Zeile löschen\n");
-  response->print("          }\n");
-  response->print("        }\n");
-
-  response->print("        // Event Listener für gesendete Codes\n");
-  response->print("        evtSource.addEventListener('codeSent', function(event) {\n");
-  response->print("          console.log('SSE codeSent:', event.data);\n");
-  response->print("          try {\n");
-  response->print("            const codeData = JSON.parse(event.data);\n");
-  response->print("            addTableRow('sent-codes-body', codeData, true);\n");
-  response->print("          } catch (e) {\n");
-  response->print("            console.error('Error parsing codeSent data:', e);\n");
-  response->print("          }\n");
-  response->print("        });\n");
-
-  response->print("        // Event Listener für empfangene Codes\n");
-  response->print("        evtSource.addEventListener('codeReceived', function(event) {\n");
-  response->print("          console.log('SSE codeReceived:', event.data);\n");
-  response->print("          try {\n");
-  response->print("            const codeData = JSON.parse(event.data);\n");
-  response->print("            addTableRow('received-codes-body', codeData, false);\n");
-  response->print("          } catch (e) {\n");
-  response->print("            console.error('Error parsing codeReceived data:', e);\n");
-  response->print("          }\n");
-  response->print("        });\n");
-
-  response->print("        // Optional: Fehlerbehandlung für die SSE-Verbindung\n");
-  response->print("        evtSource.onerror = function(err) {\n");
-  response->print("          console.error('EventSource failed:', err);\n");
-  response->print("          // Optional: Versuch, die Verbindung wiederherzustellen oder Benutzer informieren\n");
-  response->print("        };\n");
-
-  response->print("      </script>\n");
-  // --- ENDE NEU ---
-
   yield(); // <-- ADD YIELD after initial scripts
 
- // --- NEU: JavaScript für Test Send Button ---
- response->print("      <script>\n");
- response->print("        const testSendButton = document.getElementById('test-send-button');\n");
- response->print("        if (testSendButton) {\n"); // Nur ausführen, wenn der Button existiert
- response->print("          testSendButton.addEventListener('click', function(event) {\n");
- response->print("            console.log('Test Send button clicked.');\n");
- response->print("            // 1. Werte aus Formularfeldern lesen\n");
- response->print("            const irData = {};\n");
- response->print("            const prefix = 'btn_'; // Prefix der Formularfeld-IDs\n");
- response->print("            try {\n"); // Fehler abfangen, falls Elemente nicht gefunden werden
- response->print("              irData.type = document.getElementById(prefix + 'type').value;\n");
- response->print("              irData.data = document.getElementById(prefix + 'data').value;\n");
- response->print("              irData.length = parseInt(document.getElementById(prefix + 'length').value, 10);\n");
- response->print("              irData.address = document.getElementById(prefix + 'address').value;\n");
- response->print("              irData.repeat = parseInt(document.getElementById(prefix + 'repeat').value, 10);\n");
- response->print("              irData.out = parseInt(document.getElementById(prefix + 'out').value, 10);\n");
- response->print("            } catch (e) {\n");
- response->print("              console.error('Error reading form values:', e);\n");
- response->print("              alert('Error reading form values. Check console.');\n");
- response->print("              return; // Abbruch\n");
- response->print("            }\n");
+  //   // --- NEU: JavaScript für Server-Sent Events ---
+  // response->print("      <script>\n");
 
- response->print("            // 2. Prüfen, ob Makro oder Single IR\n");
-  response->print("            const isMacroTest = document.querySelector('input[name=\\\"btn_isMacro\\\"]:checked').value === '1';\n"); // Escaped quotes!
-  response->print("\n");
-  response->print("            // 3. Visuelles Feedback (optional)\n");
-  response->print("            const originalText = testSendButton.textContent;\n");
-  response->print("            testSendButton.textContent = 'Sending...';\n");
-  response->print("            testSendButton.disabled = true;\n");
-  response->print("\n");
-  response->print("            if (isMacroTest) {\n");
-  response->print("              // --- Test Send für Makro --- \n");
-  response->print("              const macroJsonString = document.getElementById(prefix + 'macroJson').value;\n");
-  response->print("              // JSON Validierung im Browser (optional aber gut)\n");
-  response->print("              try {\n");
-  response->print("                JSON.parse(macroJsonString);\n"); // Versuch zu parsen
-  response->print("              } catch (e) {\n");
-  response->print("                alert('Invalid JSON format in Macro field: ' + e.message);\n");
-  response->print("                testSendButton.textContent = originalText;\n");
-  response->print("                testSendButton.disabled = false;\n");
-  response->print("                return;\n"); // Abbruch
-  response->print("              }\n");
-  response->print("              console.log('Sending Test Macro JSON:', macroJsonString);\n");
-  response->print("\n");
-  response->print("              const formData = new URLSearchParams();\n");
-  response->print("              formData.append('plain', macroJsonString);\n");
-  response->print("\n");
-  response->print("              fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
-  response->print("              .then(response => {\n");
-  // ... (Fetch-Logik für Makro) ...
-  response->print("              })\n");
-  response->print("              .then(data => console.log('Server response to test macro:', data))\n");
-  response->print("              .catch(error => {\n");
-  // ... (Catch-Logik für Makro) ...
-  response->print("              })\n");
-  response->print("              .finally(() => {\n");
-  response->print("                testSendButton.textContent = originalText;\n");
-  response->print("                testSendButton.disabled = false;\n");
-  response->print("              });\n");
-  response->print("\n");
-  response->print("            } else {\n");
-  response->print("              // --- Test Send für Single IR --- \n");
-  response->print("              // Einfache Validierung (nur für Single IR relevant hier)\n");
-  response->print("              if (!irData.type || !irData.data || !irData.length || irData.length <= 0) {\n");
-  response->print("                alert('Please fill in at least Type, Data, and a valid Length (>0) for Single IR.');\n");
-  response->print("                testSendButton.textContent = originalText;\n"); // Reset Button before return
-  response->print("                testSendButton.disabled = false;\n");
-  response->print("                return; // Abbruch\n");
-  response->print("              }\n");
-  response->print("              if (!irData.repeat || irData.repeat <= 0) irData.repeat = 1;\n"); // Default repeat
-  response->print("              if (!irData.out || irData.out <= 0 || irData.out > 4) irData.out = 1;\n"); // Default out
-  response->print("\n");
-  response->print("              console.log('Sending Test Single IR:', irData);\n");
-  response->print("              const urlParams = new URLSearchParams({\n");
-  // ... (URL Parameter für Single IR) ...
-  response->print("              }).toString();\n");
-  response->print("\n");
-  response->print("              fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
-  response->print("              .then(response => {\n");
-  // ... (Fetch-Logik für Single IR) ...
-  response->print("              })\n");
-  response->print("              .then(data => console.log('Server response to test single IR:', data))\n");
-  response->print("              .catch(error => {\n");
-  // ... (Catch-Logik für Single IR) ...
-  response->print("              })\n");
-  response->print("              .finally(() => {\n");
-  response->print("                testSendButton.textContent = originalText;\n");
-  response->print("                testSendButton.disabled = false;\n");
-  response->print("              });\n");
-  response->print("            }\n"); // Ende else (Single IR Test)
-  response->print("          });\n"); // Ende Event Listener
-  response->print("        }\n"); // Ende if (testSendButton)
-  // --- ENDE Test Send Button ---
+  // // --- NEU: JavaScript zum Umschalten der Button-Formularfelder ---
+  // response->print("        // Funktion zum Umschalten der Felder im Button-Formular\n");
+  // response->print("        function toggleButtonFields(isMacro) {\n");
+  // response->print("          const singleFields = document.getElementById('single-ir-fields');\n");
+  // response->print("          const macroField = document.getElementById('macro-json-field');\n");
+  // response->print("          const requiredSingleIds = ['btn_type', 'btn_data', 'btn_length']; // IDs der Pflichtfelder für Single IR\n");
+  // response->print("          const requiredMacroIds = ['btn_macroJson']; // IDs der Pflichtfelder für Macro\n");
+  // response->print("\n");
+  // response->print("          if (isMacro) {\n");
+  // response->print("            if (singleFields) singleFields.style.display = 'none';\n");
+  // response->print("            if (macroField) macroField.style.display = 'block';\n");
+  // response->print("            // Macro-Feld erforderlich machen, Single-Felder nicht\n");
+  // response->print("            requiredSingleIds.forEach(id => {\n");
+  // response->print("                const el = document.getElementById(id);\n");
+  // response->print("                if (el) el.required = false;\n");
+  // response->print("            });\n");
+  // response->print("            requiredMacroIds.forEach(id => {\n");
+  // response->print("                const el = document.getElementById(id);\n");
+  // response->print("                if (el) el.required = true;\n");
+  // response->print("            });\n");
+  // response->print("          } else {\n");
+  // response->print("            if (singleFields) singleFields.style.display = 'block';\n");
+  // response->print("            if (macroField) macroField.style.display = 'none';\n");
+  // response->print("            // Single-Felder erforderlich machen, Macro-Feld nicht\n");
+  // response->print("            requiredSingleIds.forEach(id => {\n");
+  // response->print("                const el = document.getElementById(id);\n");
+  // response->print("                if (el) el.required = true;\n");
+  // response->print("            });\n");
+  // response->print("            requiredMacroIds.forEach(id => {\n");
+  // response->print("                const el = document.getElementById(id);\n");
+  // response->print("                if (el) el.required = false;\n");
+  // response->print("            });\n");
+  // response->print("          }\n");
+  // response->print("        }\n");
+  // response->print("\n");
+  // response->print("        // Sicherstellen, dass die Felder beim Laden der Seite korrekt angezeigt werden\n");
+  // response->print("        document.addEventListener('DOMContentLoaded', function() {\n");
+  // response->print("            // Prüfen, ob wir auf einer Seite mit dem Button-Formular sind\n");
+  // response->print("            const macroRadio = document.querySelector('input[name=\\\"btn_isMacro\\\"][value=\\\"1\\\"]');\n"); // Escaped quotes!
+  // response->print("            if (macroRadio) { // Nur ausführen, wenn Radio-Button existiert\n");
+  // response->print("              if (macroRadio.checked) {\n");
+  // response->print("                  toggleButtonFields(true);\n");
+  // response->print("              } else {\n");
+  // response->print("                  // Sicherstellen, dass der andere Radio-Button existiert, bevor wir umschalten\n");
+  // response->print("                  const singleRadio = document.querySelector('input[name=\\\"btn_isMacro\\\"][value=\\\"0\\\"]');\n"); // Escaped quotes!
+  // response->print("                  if (singleRadio && singleRadio.checked) {\n");
+  // response->print("                     toggleButtonFields(false);\n");
+  // response->print("                  } else { \n");
+  // response->print("                     // Fallback, falls keiner gecheckt ist (sollte nicht passieren, aber sicher ist sicher)\n");
+  // response->print("                     toggleButtonFields(false);\n");
+  // response->print("                  }\n");
+  // response->print("              }\n");
+  // response->print("            }\n");
+  // response->print("        });\n");
+  // --- ENDE NEU ---
 
- response->print("      </script>\n");
- // --- ENDE NEU ---
- yield(); // <-- ADD YIELD after initial scripts
+  // response->print("        console.log('Setting up EventSource...');\n");
+  // response->print("        const evtSource = new EventSource('/events');\n");
+  // response->print("        const MAX_TABLE_ROWS = 5; // Max Zeilen pro Tabelle\n");
 
+  // response->print("        // Funktion zum Hinzufügen einer Zeile zu einer Tabelle\n");
+  // response->print("        function addTableRow(tableBodyId, codeData, isSentTable) {\n");
+  // response->print("          const tableBody = document.getElementById(tableBodyId);\n");
+  // response->print("          if (!tableBody) return;\n");
+
+  // response->print("          // Platzhalter entfernen, falls vorhanden\n");
+  // response->print("          const placeholderId = isSentTable ? 'no-sent-codes' : 'no-received-codes';\n");
+  // response->print("          const placeholderRow = document.getElementById(placeholderId);\n");
+  // response->print("          if (placeholderRow) placeholderRow.remove();\n");
+
+  // response->print("          // Neue Zeile erstellen\n");
+  // response->print("          let newRowHtml = `<tr class='text-uppercase'>`;\n");
+  // response->print("          newRowHtml += `<td>${codeData.timestamp}</td>`;\n");
+  // response->print("          newRowHtml += `<td><code>${codeData.data}</code></td>`;\n");
+  // response->print("          newRowHtml += `<td><code>${codeData.encoding}</code></td>`;\n");
+  // response->print("          newRowHtml += `<td><code>${codeData.bits}</code></td>`;\n");
+  // response->print("          newRowHtml += `<td><code>${codeData.address || '-'}</code></td>`;\n");
+  // response->print("          if (isSentTable) {\n"); // Zusätzliche Spalten für 'Sent' Tabelle
+  // response->print("            newRowHtml += `<td><code>${codeData.repeat}</code></td>`;\n");
+  // response->print("            newRowHtml += `<td><code>${codeData.out}</code></td>`;\n");
+  // response->print("          }\n");
+  // response->print("          newRowHtml += `</tr>`;\n");
+
+  // response->print("          // Zeile am Anfang einfügen\n");
+  // response->print("          tableBody.insertAdjacentHTML('afterbegin', newRowHtml);\n");
+
+  // response->print("          // Alte Zeilen entfernen, wenn Limit überschritten\n");
+  // response->print("          while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
+  // response->print("            tableBody.deleteRow(-1); // Letzte Zeile löschen\n");
+  // response->print("          }\n");
+  // response->print("        }\n");
+
+  // response->print("        // Event Listener für gesendete Codes\n");
+  // response->print("        evtSource.addEventListener('codeSent', function(event) {\n");
+  // response->print("          console.log('SSE codeSent:', event.data);\n");
+  // response->print("          try {\n");
+  // response->print("            const codeData = JSON.parse(event.data);\n");
+  // response->print("            addTableRow('sent-codes-body', codeData, true);\n");
+  // response->print("          } catch (e) {\n");
+  // response->print("            console.error('Error parsing codeSent data:', e);\n");
+  // response->print("          }\n");
+  // response->print("        });\n");
+
+  // response->print("        // Event Listener für empfangene Codes\n");
+  // response->print("        evtSource.addEventListener('codeReceived', function(event) {\n");
+  // response->print("          console.log('SSE codeReceived:', event.data);\n");
+  // response->print("          try {\n");
+  // response->print("            const codeData = JSON.parse(event.data);\n");
+  // response->print("            addTableRow('received-codes-body', codeData, false);\n");
+  // response->print("          } catch (e) {\n");
+  // response->print("            console.error('Error parsing codeReceived data:', e);\n");
+  // response->print("          }\n");
+  // response->print("        });\n");
+
+  // response->print("        // Optional: Fehlerbehandlung für die SSE-Verbindung\n");
+  // response->print("        evtSource.onerror = function(err) {\n");
+  // response->print("          console.error('EventSource failed:', err);\n");
+  // response->print("          // Optional: Versuch, die Verbindung wiederherzustellen oder Benutzer informieren\n");
+  // response->print("        };\n");
+
+  // response->print("      </script>\n");
+  // --- ENDE NEU ---
+
+//   yield(); // <-- ADD YIELD after initial scripts
+
+//  // --- NEU: JavaScript für Test Send Button ---
+//  response->print("      <script>\n");
+//  response->print("        const testSendButton = document.getElementById('test-send-button');\n");
+//  response->print("        if (testSendButton) {\n"); // Nur ausführen, wenn der Button existiert
+//  response->print("          testSendButton.addEventListener('click', function(event) {\n");
+//  response->print("            console.log('Test Send button clicked.');\n");
+//  response->print("            // 1. Werte aus Formularfeldern lesen\n");
+//  response->print("            const irData = {};\n");
+//  response->print("            const prefix = 'btn_'; // Prefix der Formularfeld-IDs\n");
+//  response->print("            try {\n"); // Fehler abfangen, falls Elemente nicht gefunden werden
+//  response->print("              irData.type = document.getElementById(prefix + 'type').value;\n");
+//  response->print("              irData.data = document.getElementById(prefix + 'data').value;\n");
+//  response->print("              irData.length = parseInt(document.getElementById(prefix + 'length').value, 10);\n");
+//  response->print("              irData.address = document.getElementById(prefix + 'address').value;\n");
+//  response->print("              irData.repeat = parseInt(document.getElementById(prefix + 'repeat').value, 10);\n");
+//  response->print("              irData.out = parseInt(document.getElementById(prefix + 'out').value, 10);\n");
+//  response->print("            } catch (e) {\n");
+//  response->print("              console.error('Error reading form values:', e);\n");
+//  response->print("              alert('Error reading form values. Check console.');\n");
+//  response->print("              return; // Abbruch\n");
+//  response->print("            }\n");
+
+//  response->print("            // 2. Prüfen, ob Makro oder Single IR\n");
+//   response->print("            const isMacroTest = document.querySelector('input[name=\\\"btn_isMacro\\\"]:checked').value === '1';\n"); // Escaped quotes!
+//   response->print("\n");
+//   response->print("            // 3. Visuelles Feedback (optional)\n");
+//   response->print("            const originalText = testSendButton.textContent;\n");
+//   response->print("            testSendButton.textContent = 'Sending...';\n");
+//   response->print("            testSendButton.disabled = true;\n");
+//   response->print("\n");
+//   response->print("            if (isMacroTest) {\n");
+//   response->print("              // --- Test Send für Makro --- \n");
+//   response->print("              const macroJsonString = document.getElementById(prefix + 'macroJson').value;\n");
+//   response->print("              // JSON Validierung im Browser (optional aber gut)\n");
+//   response->print("              try {\n");
+//   response->print("                JSON.parse(macroJsonString);\n"); // Versuch zu parsen
+//   response->print("              } catch (e) {\n");
+//   response->print("                alert('Invalid JSON format in Macro field: ' + e.message);\n");
+//   response->print("                testSendButton.textContent = originalText;\n");
+//   response->print("                testSendButton.disabled = false;\n");
+//   response->print("                return;\n"); // Abbruch
+//   response->print("              }\n");
+//   response->print("              console.log('Sending Test Macro JSON:', macroJsonString);\n");
+//   response->print("\n");
+//   response->print("              const formData = new URLSearchParams();\n");
+//   response->print("              formData.append('plain', macroJsonString);\n");
+//   response->print("\n");
+//   response->print("              fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
+//   response->print("              .then(response => {\n");
+//   // ... (Fetch-Logik für Makro) ...
+//   response->print("              })\n");
+//   response->print("              .then(data => console.log('Server response to test macro:', data))\n");
+//   response->print("              .catch(error => {\n");
+//   // ... (Catch-Logik für Makro) ...
+//   response->print("              })\n");
+//   response->print("              .finally(() => {\n");
+//   response->print("                testSendButton.textContent = originalText;\n");
+//   response->print("                testSendButton.disabled = false;\n");
+//   response->print("              });\n");
+//   response->print("\n");
+//   response->print("            } else {\n");
+//   response->print("              // --- Test Send für Single IR --- \n");
+//   response->print("              // Einfache Validierung (nur für Single IR relevant hier)\n");
+//   response->print("              if (!irData.type || !irData.data || !irData.length || irData.length <= 0) {\n");
+//   response->print("                alert('Please fill in at least Type, Data, and a valid Length (>0) for Single IR.');\n");
+//   response->print("                testSendButton.textContent = originalText;\n"); // Reset Button before return
+//   response->print("                testSendButton.disabled = false;\n");
+//   response->print("                return; // Abbruch\n");
+//   response->print("              }\n");
+//   response->print("              if (!irData.repeat || irData.repeat <= 0) irData.repeat = 1;\n"); // Default repeat
+//   response->print("              if (!irData.out || irData.out <= 0 || irData.out > 4) irData.out = 1;\n"); // Default out
+//   response->print("\n");
+//   response->print("              console.log('Sending Test Single IR:', irData);\n");
+//   response->print("              const urlParams = new URLSearchParams({\n");
+//   // ... (URL Parameter für Single IR) ...
+//   response->print("              }).toString();\n");
+//   response->print("\n");
+//   response->print("              fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
+//   response->print("              .then(response => {\n");
+//   // ... (Fetch-Logik für Single IR) ...
+//   response->print("              })\n");
+//   response->print("              .then(data => console.log('Server response to test single IR:', data))\n");
+//   response->print("              .catch(error => {\n");
+//   // ... (Catch-Logik für Single IR) ...
+//   response->print("              })\n");
+//   response->print("              .finally(() => {\n");
+//   response->print("                testSendButton.textContent = originalText;\n");
+//   response->print("                testSendButton.disabled = false;\n");
+//   response->print("              });\n");
+//   response->print("            }\n"); // Ende else (Single IR Test)
+//   response->print("          });\n"); // Ende Event Listener
+//   response->print("        }\n"); // Ende if (testSendButton)
+//   // --- ENDE Test Send Button ---
+
+//  response->print("      </script>\n");
+//  // --- ENDE NEU ---
+//  yield(); // <-- ADD YIELD after initial scripts
+
+response->print("    </div>\n"); // Ende .container
+
+   // --- NEU: Lade das generierte Skript am Ende des Body ---
+   response->print("    <script src='/js/scripts.js'></script>\n");
+   // --- ENDE NEU --
 
  response->print("  </body>\n");
  response->print("</html>\n");
@@ -2615,65 +2890,129 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 // Hauptfunktion, die die Arbeit macht (AsyncResponseStream Version)
 void sendHomePage(AsyncWebServerRequest *request, String message, String header, int type, int httpcode) {
 
+  yield(); // <--- NEW: Yield IMMEDIATELY upon entry
+  Serial.println("--> Entered sendHomePage"); // Log entry
+
   // --- Erstelle den Response Stream ---
   AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", httpcode);
+  if (!response) { // Check if stream creation failed (unlikely but possible)
+      Serial.println("!!! ERROR: Failed to beginResponseStream!");
+      request->send(500, "text/plain", "Internal Server Error");
+      return;
+  }
+  Serial.println("    beginResponseStream OK");
 
-  // --- Schreibe Header in den Stream ---
-  sendHeader(response); // Übergibt den Stream
+  Serial.println("    Calling sendHeader...");
+  Serial.printf("      Heap BEFORE sendHeader: %u\n", ESP.getFreeHeap());
+  sendHeader(response);
+  Serial.printf("      Heap AFTER sendHeader: %u\n", ESP.getFreeHeap());
+  Serial.println("    sendHeader returned.");
+
+  // --- NEW TEST BLOCK ---
+  volatile int test_var = 0; // Simplest possible operation
+  Serial.println("    Minimal operation done.");
+  // yield(); // Temporarily remove yield
+
+  // Now try simplest stream operation
+  response->print(""); // Print an empty string (minimal stream interaction)
+  Serial.println("    Minimal stream print done.");
+ Serial.printf("      Heap after minimal print: %u\n", ESP.getFreeHeap());
+
+  Serial.println("    Attempting yield..."); // Log before yield
+  yield();
+  Serial.println("    Yield successful."); // Log after yield
+  Serial.printf("      Heap after yield: %u\n", ESP.getFreeHeap());
+
+  Serial.println("    Printing buttonMacroJsStore...");
+
 
   // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN +++
   // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN (Vector Version) +++
-  response->print("      <div class='row'>\n");
-  response->print("        <div class='col-md-12'>\n");
-  response->print("          <h3>Remote Buttons</h3>\n");
-  response->print("          <div id='remote-buttons' class='text-center'>\n"); // Container für Buttons
+  Serial.println("    Printing buttonMacroJsStore...");
+  // --- NEW: Log the size ---
+  Serial.printf("      Size of buttonMacroJsStore: %d bytes\n", buttonMacroJsStore.length());
 
-  // --- NEU: JavaScript-Objekt für Makro-Daten vorbereiten ---
+  // --- MODIFIED: Chunked Printing ---
   response->print("          <script>\n");
-  response->print(buttonMacroJsStore); // Print the pre-generated JS
+
+  const size_t chunkSize = 512; // Print in 512-byte chunks (adjust if needed)
+  size_t totalLength = buttonMacroJsStore.length();
+  for (size_t i = 0; i < totalLength; i += chunkSize) {
+    size_t currentChunkSize = std::min(chunkSize, totalLength - i);
+    // Use substring or direct pointer access if comfortable
+    response->print(buttonMacroJsStore.substring(i, i + currentChunkSize));
+    Serial.printf("      Printed chunk %d/%d (%d bytes)\n", (i / chunkSize) + 1, (totalLength + chunkSize - 1) / chunkSize, currentChunkSize); // Log chunk progress
+    yield(); // <--- Yield AFTER printing each chunk
+  }
+  // response->print(buttonMacroJsStore); // OLD: Print all at once (Remove/Comment this)
+
   response->print("          </script>\n");
-  // --- ENDE NEU ---
+  Serial.println("    buttonMacroJsStore printed (chunked).");
+  // yield(); // The yield inside the loop makes this one potentially redundant, but keep it for safety for now.
 
+  Serial.println("    Starting button generation loop...");
 
+  // --- NEW Debugging around vector access ---
+  Serial.printf("      Heap BEFORE vector check: %u\n", ESP.getFreeHeap());
+  Serial.printf("      Checking buttonConfigs.size() = %d\n", buttonConfigs.size()); // Check size first
+  Serial.println("      Checking if buttonConfigs is empty...");
   if (!buttonConfigs.empty()) {
-      for (size_t i = 0; i < buttonConfigs.size(); ++i) {
-        const auto& button = buttonConfigs[i];
-        if (!button.configured) continue; // Nur konfigurierte Buttons anzeigen
-
-        String buttonId = "btn_" + String(i); // Eindeutige ID für jeden Button
-
-        String buttonHtml = "            <button id='" + buttonId + "' class='btn btn-primary btn-lg remote-button' style='margin: 5px;' ";
-        // --- NEU: data-ismacro hinzufügen ---
-        buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
-        // --- Ende NEU ---
-
-        // Füge andere data-* Attribute nur hinzu, wenn es KEIN Makro ist
-        if (!button.isMacro) {
-            buttonHtml += "data-type='" + String(button.type) + "' ";
-            buttonHtml += "data-data='" + String(button.data) + "' ";
-            buttonHtml += "data-length='" + String(button.length) + "' ";
-            buttonHtml += "data-address='" + String(button.address) + "' ";
-            buttonHtml += "data-repeat='" + String(button.repeat) + "' ";
-            buttonHtml += "data-out='" + String(button.out) + "'";
-        }
-        // Button-Text
-        buttonHtml += ">";
-        buttonHtml += String(button.name);
-        buttonHtml += "</button>\n";
-        response->print(buttonHtml);
-
-        // if (i % 3 == 0) { // Beispiel: Alle 3 Buttons yielden (Anzahl ggf. anpassen)
-          yield();
-          // Optional zum Debuggen:
-          // Serial.printf("Yielding in button generation loop at i=%d\n", i);
-        // }
-
+    Serial.println("      Vector is NOT empty. Entering loop."); // Log entry into loop block
+    for (size_t i = 0; i < buttonConfigs.size(); ++i) {
+      Serial.printf("      Loop iteration i=%d\n", i); // Log each iteration start
+      // --- Add heap check inside loop ---
+      if (i % 2 == 0) { // Check heap every few iterations
+         Serial.printf("        Heap inside loop (i=%d): %u\n", i, ESP.getFreeHeap());
       }
-    } else {
-        response->print("            <p><em>No remote buttons configured yet.</em></p>\n");
-    }
+      // --- End heap check ---
+      const auto& button = buttonConfigs[i];
+      if (!button.configured) {
+         Serial.printf("        Skipping button %d (not configured)\n", i);
+         continue;
+      }
 
-    response->print("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
+      String buttonId = "btn_" + String(i);
+
+                // // --- START TEMPORARY SIMPLIFICATION ---
+                // String buttonHtml = "            <button class='btn btn-secondary btn-sm' style='margin: 2px;'>Test " + String(i) + "</button>\n";
+                // // --- END TEMPORARY SIMPLIFICATION ---
+      
+                // --- ORIGINAL buttonHtml GENERATION COMMENTED OUT ---
+                String buttonHtml = "            <button id='" + buttonId + "' class='btn btn-primary btn-lg remote-button' style='margin: 5px;' ";
+                buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
+                if (!button.isMacro) {
+                    buttonHtml += "data-type='" + String(button.type) + "' ";
+                    buttonHtml += "data-data='" + String(button.data) + "' ";
+                    buttonHtml += "data-length='" + String(button.length) + "' ";
+                    buttonHtml += "data-address='" + String(button.address) + "' ";
+                    buttonHtml += "data-repeat='" + String(button.repeat) + "' ";
+                    buttonHtml += "data-out='" + String(button.out) + "'";
+                }
+                buttonHtml += ">";
+                buttonHtml += String(button.name);
+                buttonHtml += "</button>\n";
+                // --- END ORIGINAL ---
+      
+                response->print(buttonHtml);
+                yield(); // Keep yield inside loop
+              }
+              Serial.println("    Button generation loop finished.");
+            } else {
+
+    Serial.println("      Vector IS empty."); // Log if empty
+    response->print("            <p><em>No remote buttons configured yet.</em></p>\n");
+    Serial.println("    No buttons to generate.");
+  }
+  Serial.printf("      Heap AFTER vector check/loop: %u\n", ESP.getFreeHeap());
+  // --- END Debugging ---
+
+  // --- Add log BEFORE the problematic yield ---
+  Serial.println("    Attempting yield AFTER button loop...");
+  yield(); // <--- This is the yield that seems to be crashing
+  Serial.println("    Yield AFTER button loop successful.");
+  // --- End log ---
+
+  response->print("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
     response->print("          </div>\n");
     response->print("        </div>\n");
     response->print("      </div><hr />\n");
@@ -2715,15 +3054,30 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
       }
   };
   generateSentRow(last_send);
+  yield(); // <--- NEW YIELD
   generateSentRow(last_send_2);
+  yield(); // <--- NEW YIELD
   generateSentRow(last_send_3);
+  yield(); // <--- NEW YIELD
   generateSentRow(last_send_4);
+  yield(); // <--- NEW YIELD
   generateSentRow(last_send_5);
+  yield(); // <--- NEW YIELD
+
+      // --- Add Log after lambda calls ---
+      Serial.println("    Finished generating Sent Codes rows.");
+
 // NEU: Platzhalterzeile mit ID versehen
 if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
 response->print("              <tr id='no-sent-codes'><td colspan='7' class='text-center'><em>No codes sent</em></td></tr>");
 response->print("            </tbody></table>\n");
   response->print("          </div></div>\n");
+
+        // --- Add Log before the next existing yield ---
+        Serial.println("    Attempting yield AFTER Sent Codes table...");
+        yield(); // Keep the existing yield after the Sent table
+        Serial.println("    Yield AFTER Sent Codes table successful.");
+  
 
   // --- Codes Received Table ---
   response->print("      <div class='row'>\n");
@@ -2740,15 +3094,26 @@ response->print("            </tbody></table>\n");
       }
   };
   generateReceivedRow(last_recv, 1);
+  yield(); // <--- NEW YIELD
   generateReceivedRow(last_recv_2, 2);
+  yield(); // <--- NEW YIELD
   generateReceivedRow(last_recv_3, 3);
+  yield(); // <--- NEW YIELD
   generateReceivedRow(last_recv_4, 4);
+  yield(); // <--- NEW YIELD
   generateReceivedRow(last_recv_5, 5);
+  yield(); // <--- NEW YIELD
+
   // NEU: Platzhalterzeile mit ID versehen
   if (!last_recv.valid && !last_recv_2.valid && !last_recv_3.valid && !last_recv_4.valid && !last_recv_5.valid)
   response->print("              <tr id='no-received-codes'><td colspan='5' class='text-center'><em>No codes received</em></td></tr>");
   response->print("            </tbody></table>\n");
   response->print("          </div></div><hr />\n");
+  
+  // --- Add Log before the next existing yield ---
+  Serial.println("    Attempting yield AFTER Received Codes table...");
+  yield(); // Keep the existing yield after the Received table
+  Serial.println("    Yield AFTER Received Codes table successful.");
 
   // +++ FORMULAR ZUM SENDEN +++
   response->print("      <div class='row'>\n");
@@ -2824,6 +3189,11 @@ response->print("            </tbody></table>\n");
   response->print("      </div><hr />\n");
   // +++ ENDE FORMULAR +++
 
+        // --- Add Log before the next existing yield ---
+        Serial.println("    Attempting yield AFTER end formular table...");
+        yield(); // Keep the existing yield after the Received table
+        Serial.println("    Yield AFTER end formular table successful.");
+  
   // --- Pin Information ---
   response->print("      <div class='row'>\n");
   response->print("        <div class='col-md-12'>\n");
@@ -2837,110 +3207,151 @@ response->print("            </tbody></table>\n");
   response->print("      </div>\n");
 
   // +++ JAVASCRIPT FÜR REMOTE BUTTONS +++
-  response->print("      <script>\n");
-  response->print("        document.getElementById('remote-buttons').addEventListener('click', function(event) {\n");
-  response->print("          if (event.target.classList.contains('remote-button')) {\n");
-  response->print("            event.preventDefault();\n");
-  response->print("            const button = event.target;\n");
-  response->print("            const isMacro = button.dataset.ismacro === 'true';\n"); // Prüfe data-ismacro
-  response->print("            const buttonId = button.id;\n"); // Hole die Button-ID
+  // response->print("      <script>\n");
+  // response->print("        document.getElementById('remote-buttons').addEventListener('click', function(event) {\n");
+  // response->print("          if (event.target.classList.contains('remote-button')) {\n");
+  // response->print("            event.preventDefault();\n");
+  // response->print("            const button = event.target;\n");
+  // response->print("            const isMacro = button.dataset.ismacro === 'true';\n"); // Prüfe data-ismacro
+  // response->print("            const buttonId = button.id;\n"); // Hole die Button-ID
 
-  response->print("            console.log('Button clicked:', button.textContent, 'Is Macro:', isMacro);\n");
+  // response->print("            console.log('Button clicked:', button.textContent, 'Is Macro:', isMacro);\n");
 
-  response->print("            // Visuelles Feedback\n");
-  response->print("            button.classList.remove('btn-success', 'btn-danger');\n"); // Reset status
-  response->print("            button.classList.add('btn-warning'); \n");
-  response->print("            button.disabled = true;\n"); // Deaktivieren während des Sendens
+  // response->print("            // Visuelles Feedback\n");
+  // response->print("            button.classList.remove('btn-success', 'btn-danger');\n"); // Reset status
+  // response->print("            button.classList.add('btn-warning'); \n");
+  // response->print("            button.disabled = true;\n"); // Deaktivieren während des Sendens
 
-  response->print("            if (isMacro) {\n");
-  response->print("              // --- Makro Senden --- \n");
-  response->print("              const macroJsonString = buttonMacroDataStore[buttonId];\n"); // Hole JSON aus dem Store
-  response->print("              if (!macroJsonString) { \n");
-  response->print("                 console.error('Macro JSON not found or invalid for button:', buttonId);\n");
-  response->print("                 button.classList.remove('btn-warning');\n");
-  response->print("                 button.classList.add('btn-danger');\n");
-  response->print("                 button.disabled = false;\n");
-  response->print("                 return; \n"); // Abbruch
-  response->print("              }\n");
-  response->print("              console.log('Sending Macro JSON:', macroJsonString);\n");
+  // response->print("            if (isMacro) {\n");
+  // response->print("              // --- Makro Senden --- \n");
+  // response->print("              const macroJsonString = buttonMacroDataStore[buttonId];\n"); // Hole JSON aus dem Store
+  // response->print("              if (!macroJsonString) { \n");
+  // response->print("                 console.error('Macro JSON not found or invalid for button:', buttonId);\n");
+  // response->print("                 button.classList.remove('btn-warning');\n");
+  // response->print("                 button.classList.add('btn-danger');\n");
+  // response->print("                 button.disabled = false;\n");
+  // response->print("                 return; \n"); // Abbruch
+  // response->print("              }\n");
+  // response->print("              console.log('Sending Macro JSON:', macroJsonString);\n");
 
-  response->print("              const formData = new URLSearchParams();\n");
-  response->print("              formData.append('plain', macroJsonString);\n"); // Füge den rohen JSON-String hinzu
+  // response->print("              const formData = new URLSearchParams();\n");
+  // response->print("              formData.append('plain', macroJsonString);\n"); // Füge den rohen JSON-String hinzu
 
-  response->print("              fetch('/json', {\n"); // POST an /json
-  response->print("                method: 'POST',\n");
-  response->print("                headers: {\n");
-  response->print("                  'Content-Type': 'application/x-www-form-urlencoded',\n");
-  response->print("                },\n");
-  response->print("                body: formData\n");
-  response->print("              })\n");
-  response->print("              .then(response => {\n");
-  response->print("                button.classList.remove('btn-warning');\n");
-  response->print("                if (!response.ok) {\n");
-  response->print("                  console.error('Error sending Macro command via POST. Status:', response.status);\n");
-  response->print("                  button.classList.add('btn-danger');\n");
-  response->print("                } else {\n");
-  response->print("                  console.log('Macro command sent successfully.');\n");
-  response->print("                  button.classList.add('btn-success');\n");
-  response->print("                }\n");
-  response->print("                return response.text();\n"); // Lese Antwort, auch bei Fehler
-  response->print("              })\n");
-  response->print("              .then(data => console.log('Server response to macro:', data))\n");
-  response->print("              .catch(error => {\n");
-  response->print("                console.error('Fetch error during macro send:', error);\n");
-  response->print("                button.classList.remove('btn-warning');\n");
-  response->print("                button.classList.add('btn-danger');\n");
-  response->print("              })\n");
-  response->print("              .finally(() => {\n"); // Wird immer ausgeführt
-  response->print("                 setTimeout(() => { button.classList.remove('btn-success', 'btn-danger'); button.disabled = false; }, 750);\n"); // Reset nach kurzer Zeit
-  response->print("              });\n");
+  // response->print("              fetch('/json', {\n"); // POST an /json
+  // response->print("                method: 'POST',\n");
+  // response->print("                headers: {\n");
+  // response->print("                  'Content-Type': 'application/x-www-form-urlencoded',\n");
+  // response->print("                },\n");
+  // response->print("                body: formData\n");
+  // response->print("              })\n");
+  // response->print("              .then(response => {\n");
+  // response->print("                button.classList.remove('btn-warning');\n");
+  // response->print("                if (!response.ok) {\n");
+  // response->print("                  console.error('Error sending Macro command via POST. Status:', response.status);\n");
+  // response->print("                  button.classList.add('btn-danger');\n");
+  // response->print("                } else {\n");
+  // response->print("                  console.log('Macro command sent successfully.');\n");
+  // response->print("                  button.classList.add('btn-success');\n");
+  // response->print("                }\n");
+  // response->print("                return response.text();\n"); // Lese Antwort, auch bei Fehler
+  // response->print("              })\n");
+  // response->print("              .then(data => console.log('Server response to macro:', data))\n");
+  // response->print("              .catch(error => {\n");
+  // response->print("                console.error('Fetch error during macro send:', error);\n");
+  // response->print("                button.classList.remove('btn-warning');\n");
+  // response->print("                button.classList.add('btn-danger');\n");
+  // response->print("              })\n");
+  // response->print("              .finally(() => {\n"); // Wird immer ausgeführt
+  // response->print("                 setTimeout(() => { button.classList.remove('btn-success', 'btn-danger'); button.disabled = false; }, 750);\n"); // Reset nach kurzer Zeit
+  // response->print("              });\n");
 
-  response->print("            } else {\n");
-  response->print("              // --- Single IR Senden (Bestehende Logik) --- \n");
-  response->print("              const irData = {\n"); // Lese aus data-* Attributen
-  response->print("                type: button.dataset.type,\n");
-  response->print("                data: button.dataset.data,\n");
-  response->print("                length: parseInt(button.dataset.length, 10),\n");
-  response->print("                address: button.dataset.address,\n");
-  response->print("                repeat: parseInt(button.dataset.repeat, 10),\n");
-  response->print("                out: parseInt(button.dataset.out, 10)\n");
-  response->print("              };\n");
-  response->print("              console.log('Sending Single IR:', irData);\n");
+  //       // --- Add Log before the next existing yield ---
+  //       Serial.println("    Attempting yield AFTER before else...");
+  //       yield(); // Keep the existing yield after the Received table
+  //       Serial.println("    Yield AFTER Received before else successful.");
 
-  response->print("              const urlParams = new URLSearchParams(irData).toString();\n");
-  response->print("              fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n"); // GET an /sendbutton
-  response->print("              .then(response => {\n");
-  response->print("                button.classList.remove('btn-warning');\n");
-  response->print("                if (!response.ok) {\n");
-  response->print("                  console.error('Error sending Single IR command via GET. Status:', response.status);\n");
-  response->print("                  button.classList.add('btn-danger');\n");
-  response->print("                } else {\n");
-  response->print("                  console.log('Single IR command sent successfully.');\n");
-  response->print("                  button.classList.add('btn-success');\n");
-  response->print("                }\n");
-  response->print("                return response.text();\n");
-  response->print("              })\n");
-  response->print("              .then(data => console.log('Server response to single IR:', data))\n");
-  response->print("              .catch(error => {\n");
-  response->print("                console.error('Fetch error during single IR send:', error);\n");
-  response->print("                button.classList.remove('btn-warning');\n");
-  response->print("                button.classList.add('btn-danger');\n");
-  response->print("              })\n");
-  response->print("              .finally(() => {\n");
-  response->print("                 setTimeout(() => { button.classList.remove('btn-success', 'btn-danger'); button.disabled = false; }, 750);\n");
-  response->print("              });\n");
-  response->print("            }\n"); // Ende else (Single IR)
+  // response->print("            } else {\n");
+  // response->print("              // --- Single IR Senden (Bestehende Logik) --- \n");
+  // response->print("              const irData = {\n"); // Lese aus data-* Attributen
+  // response->print("                type: button.dataset.type,\n");
+  // response->print("                data: button.dataset.data,\n");
+  // response->print("                length: parseInt(button.dataset.length, 10),\n");
+  // response->print("                address: button.dataset.address,\n");
+  // response->print("                repeat: parseInt(button.dataset.repeat, 10),\n");
+  // response->print("                out: parseInt(button.dataset.out, 10)\n");
+  // response->print("              };\n");
+  // response->print("              console.log('Sending Single IR:', irData);\n");
 
-  response->print("          }\n"); // Ende if (event.target.classList.contains...)
-  response->print("        });\n");
-  response->print("      </script>\n");
-  // +++ ENDE JAVASCRIPT +++
+  //   // --- Add yield within the else block (1) ---
+  //   Serial.println("    Attempting yield WITHIN single IR JS block (1)...");
+  //   yield();
+  //   Serial.println("    Yield WITHIN single IR JS block (1) successful.");
 
-  // --- Schreibe Footer in den Stream ---
-  sendFooter(response); // Übergibt den Stream
+    
+  // response->print("              const urlParams = new URLSearchParams(irData).toString();\n");
+  // response->print("              fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n"); // GET an /sendbutton
+  // response->print("              .then(response => {\n");
+  // response->print("                button.classList.remove('btn-warning');\n");
+  // response->print("                if (!response.ok) {\n");
+  // response->print("                  console.error('Error sending Single IR command via GET. Status:', response.status);\n");
+  // response->print("                  button.classList.add('btn-danger');\n");
+  // response->print("                } else {\n");
+  // response->print("                  console.log('Single IR command sent successfully.');\n");
+  // response->print("                  button.classList.add('btn-success');\n");
+  // response->print("                }\n");
+  // response->print("                return response.text();\n");
+  // response->print("              })\n");
 
-  // --- Sende den kompletten Stream ---
-  request->send(response);
+  //   // --- Add another yield within the else block (2) ---
+  //   Serial.println("    Attempting yield WITHIN single IR JS block (2)...");
+  //   yield();
+  //   Serial.println("    Yield WITHIN single IR JS block (2) successful.");
+
+    
+  // response->print("              .then(data => console.log('Server response to single IR:', data))\n");
+  // response->print("              .catch(error => {\n");
+  // response->print("                console.error('Fetch error during single IR send:', error);\n");
+  // response->print("                button.classList.remove('btn-warning');\n");
+  // response->print("                button.classList.add('btn-danger');\n");
+  // response->print("              })\n");
+  // response->print("              .finally(() => {\n");
+  // response->print("                 setTimeout(() => { button.classList.remove('btn-success', 'btn-danger'); button.disabled = false; }, 750);\n");
+  // response->print("              });\n");
+  
+  // // --- Add another yield within the else block (2) ---
+  // Serial.println("    Attempting yield finaly......");
+  // yield();
+  // Serial.println("    Yield WITHIN finaly successful.");
+
+
+  // response->print("            }\n"); // Ende else (Single IR)
+
+  // response->print("          }\n"); // Ende if (event.target.classList.contains...)
+  // response->print("        });\n");
+  // response->print("      </script>\n");
+  // // +++ ENDE JAVASCRIPT +++
+
+// --- NEW: Final yield before sendFooter ---
+Serial.println("    Attempting FINAL yield before sendFooter...");
+yield();
+Serial.println("    FINAL yield before sendFooter successful.");
+// --- END NEW ---
+
+// --- Add Log before calling sendFooter ---
+Serial.println("    Attempting to call sendFooter...");
+// --- Schreibe Footer in den Stream ---
+sendFooter(response); // Übergibt den Stream
+Serial.println("    sendFooter returned.");
+
+// --- Add Log before final send ---
+Serial.println("    Attempting final request->send(response)...");
+// --- Sende den kompletten Stream ---
+request->send(response);
+
+// --- Stack Check at End ---
+UBaseType_t stackHighWaterMarkEnd = uxTaskGetStackHighWaterMark(NULL);
+Serial.printf("<-- Leaving sendHomePage (after send) (Stack HWM: %u bytes, Min Free: %u)\n", stackHighWaterMarkEnd, stackHighWaterMarkEnd); // HWM is minimum free stack
+
 }
 
 
@@ -2959,8 +3370,23 @@ void sendCodePage(AsyncWebServerRequest *request, Code selCode, int httpcode){
   // --- Erstelle den Response Stream ---
   AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", httpcode);
 
-  // --- Schreibe Header in den Stream ---
-  sendHeader(response); // Übergibt den Stream
+  Serial.println("    Calling sendHeader...");
+  sendHeader(response);
+  Serial.println("    sendHeader returned.");
+
+   // --- Check if stream creation failed ---
+   if (response == nullptr) {
+    Serial.println("!!! ERROR: Failed to beginResponseStream in sendCodePage!");
+    request->send(500, "text/plain", "Internal Server Error");
+    return;
+}
+Serial.println("    sendCodePage: beginResponseStream OK.");
+
+Serial.println("    sendCodePage: Calling sendHeader...");
+sendHeader(response);
+Serial.println("    sendCodePage: sendHeader returned.");
+
+  // --- END CHECK ---
 
   // --- Code Details ---
   response->print("      <div class='row'>\n");
