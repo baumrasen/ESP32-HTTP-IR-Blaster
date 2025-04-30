@@ -684,12 +684,12 @@ void flushStep(String step, File jsf, size_t wc) {
   // --- Zusätzlicher Check ---
 size_t currentSize = jsf.size();
 int currentError = jsf.getWriteError();
-Serial.printf("  Checkpoint: Size before flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
+// Serial.printf("  Checkpoint: Size before flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
 jsf.flush(); // Versuch, hier schon zu flushen
 delay(50); // <-- Kleine Verzögerung
 currentSize = jsf.size();
 currentError = jsf.getWriteError();
-Serial.printf("  Checkpoint 1: Size after flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
+// Serial.printf("  Checkpoint 1: Size after flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
 if (currentSize == 0 && wc > 0) { // written_chunk vom ersten print
     Serial.println("  !!! ERROR DETECTED: Size reset to 0 after Checkpoint 1 flush!");
     // Hier könnte man ggf. abbrechen
@@ -700,7 +700,7 @@ if (currentSize == 0 && wc > 0) { // written_chunk vom ersten print
 // Füge diese neue Funktion irgendwo vor setup() ein
 
 void generateAndWriteJavaScript() {
-  Serial.printf("  Heap before JS write: %u\n", ESP.getFreeHeap());
+  // Serial.printf("  Heap before JS write: %u\n", ESP.getFreeHeap());
   Serial.println("Generating and writing JavaScript to LittleFS (/js/scripts.js)...");
 
   // Stelle sicher, dass das /js Verzeichnis existiert
@@ -991,7 +991,7 @@ void generateAndWriteJavaScript() {
     }
   }
 
-  Serial.printf("  Heap after JS write: %u\n", ESP.getFreeHeap());
+  // Serial.printf("  Heap after JS write: %u\n", ESP.getFreeHeap());
 
 }
 
