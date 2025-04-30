@@ -1,5 +1,5 @@
 #include <FS.h>                                               // This needs to be first, or it all crashes and burns
-#include "credentials.h" // NEU: Include der Zugangsdaten-Datei
+#include "credentials.h"                                      // Include der Zugangsdaten-Datei
 
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
@@ -59,8 +59,7 @@ DynamicJsonDocument deviceState(256);
 
 WiFiClient client;
 AsyncWebServer *server = NULL;
-// AsyncEventSource events("/events"); // ALT: Objekt direkt erstellen
-AsyncEventSource *events = nullptr; // NEU: Nur Zeiger deklarieren
+AsyncEventSource *events = nullptr;                             // Nur Zeiger deklarieren
 Ticker ticker;
 
 bool shouldSaveConfig = false;                                 // Flag for saving data
@@ -93,7 +92,6 @@ class Code {
     int bits = 0;
     time_t timestamp = 0;
     bool valid = false;
-    // +++ NEUE MEMBER +++
     int repeat = 1; // Default repeat count
     int out = 1;    // Default output pin
 };
@@ -134,20 +132,16 @@ struct ButtonConfig {
   char address[20] = "";   // Adresse (Hex String, optional)
   int repeat = 1;          // Wiederholungen
   int out = 1;             // Output Pin (1-4)
-  // --- NEUE Felder für Makros ---
-  bool isMacro = false;    // NEU: Ist dieser Button ein Makro?
-  char macroJson[512] = ""; // NEU: JSON-String für das Makro (Größe ggf. anpassen)
-  // --- Status ---
+  bool isMacro = false;    //  Ist dieser Button ein Makro?
+  char macroJson[512] = ""; //  JSON-String für das Makro (Größe ggf. anpassen)
   bool configured = false; // Ist dieser Button-Slot konfiguriert?
 };
 
-// ButtonConfig buttonConfigs[MAX_BUTTONS]; // ALT
-std::vector<ButtonConfig> buttonConfigs; // NEU
+std::vector<ButtonConfig> buttonConfigs;
 //+=============================================================================
 
 // Function to update the JS store string
 void updateButtonMacroJsStore() {
-  Serial.println("Updating buttonMacroJsStore...");
   String tempJs = "const buttonMacroDataStore = {";
   bool firstEntry = true;
   for (size_t i = 0; i < buttonConfigs.size(); ++i) {
@@ -169,11 +163,9 @@ void updateButtonMacroJsStore() {
   }
   tempJs += "\n};";
   buttonMacroJsStore = tempJs; // Update the global variable
-  Serial.println("buttonMacroJsStore updated.");
-  // Serial.println(buttonMacroJsStore); // Optional: Print the generated JS
 }
 
-// --- NEU: Hilfsfunktion zum Senden von Code-Updates als SSE ---
+// --- Hilfsfunktion zum Senden von Code-Updates als SSE ---
 void sendCodeUpdateEvent(const char* eventName, const Code& code) {
   if (events != nullptr && events->count() > 0) { // <-- Prüfen, ob diese Zeile aktiv ist
     DynamicJsonDocument jsonDoc(512); // Ausreichend für ein Code-Objekt
@@ -188,7 +180,6 @@ void sendCodeUpdateEvent(const char* eventName, const Code& code) {
     String jsonString;
     serializeJson(jsonDoc, jsonString);
     events->send(jsonString.c_str(), eventName, millis()); // <-- Prüfen, ob diese Zeile aktiv ist
-    Serial.printf("SSE Event '%s' sent.\n", eventName);
   }
 }
 
@@ -208,13 +199,6 @@ void saveConfigCallback () {
 void loadButtonConfig() {
   buttonConfigs.clear(); // Vector vor dem Laden leeren
   
-  // --- ENTFERNT ---
-  // if (!LittleFS.begin()) {
-  //   Serial.println("Failed to mount LittleFS for button config loading.");
-  //   return;
-  // }
-  // --- ENDE ENTFERNT ---
-
   // Optional: Prüfen, ob das Root-Verzeichnis existiert (Indikator für gemountetes FS)
   if (!LittleFS.exists("/")) {
     Serial.println("ERROR in loadButtonConfig: LittleFS root directory not found (FS likely not mounted).");
@@ -222,7 +206,6 @@ void loadButtonConfig() {
  }
 
   if (LittleFS.exists("/buttons.json")) {
-    Serial.println("Reading button config file");
     File configFile = LittleFS.open("/buttons.json", "r");
     if (configFile) {
       DynamicJsonDocument jsonDoc(8192); // Größe ggf. anpassen (9 Buttons * ~150 Zeichen)
@@ -236,17 +219,15 @@ void loadButtonConfig() {
 
           // Optional: Limit prüfen, falls MAX_BUTTONS noch verwendet wird
           if (buttonConfigs.size() >= MAX_BUTTONS) {
-             Serial.println("Maximum number of buttons reached, ignoring further entries.");
             break;
           }
           
           ButtonConfig newButton; // Temporäres Objekt erstellen
 
           strncpy(newButton.name, buttonJson["name"] | "", sizeof(newButton.name) - 1);
-          // --- NEU: Makro-Felder lesen ---
+          // --- Makro-Felder lesen ---
           newButton.isMacro = buttonJson["isMacro"] | false;
           strncpy(newButton.macroJson, buttonJson["macroJson"] | "", sizeof(newButton.macroJson) - 1);
-          // --- Ende NEU ---
 
           strncpy(newButton.type, buttonJson["type"] | "", sizeof(newButton.type) - 1);
           strncpy(newButton.data, buttonJson["data"] | "", sizeof(newButton.data) - 1);
@@ -294,13 +275,6 @@ void loadButtonConfig() {
 }
 
 void saveButtonConfig() {
-  // --- ENTFERNT ---
-  // if (!LittleFS.begin()) {
-  //   Serial.println("        ERROR: Failed to mount LittleFS!");
-  //   return;
-  // }
-  // Serial.println("        LittleFS mounted."); // Auch entfernen
-  // --- ENDE ENTFERNT ---
 
   // Optional: Prüfen, ob das Root-Verzeichnis existiert
   if (!LittleFS.exists("/")) {
@@ -321,7 +295,7 @@ void saveButtonConfig() {
      buttonJson["name"] = button.name;
      buttonJson["configured"] = button.configured; // Oder immer true, wenn hier gespeichert
 
-     // --- NEU: Makro-Felder speichern ---
+     // --- Makro-Felder speichern ---
      buttonJson["isMacro"] = button.isMacro;
      if (button.isMacro) {
         buttonJson["macroJson"] = button.macroJson;
@@ -361,7 +335,7 @@ void saveButtonConfig() {
   }
   configFile.close();
   Serial.println("    <== saveButtonConfig: Leaving function.");
-  updateButtonMacroJsStore(); // <-- ADD THIS CAL
+  updateButtonMacroJsStore();
 }
 
 //+=============================================================================
@@ -566,43 +540,43 @@ bool setupWifi(bool resetConf) {
   // // Reset device if on config portal for greater than 3 minutes
   // wifiManager.setConfigPortalTimeout(180);
 
-  if (LittleFS.begin(true)) {
-    Serial.println("mounted file system");
-    // if (LittleFS.exists("/config.json")) {
-    //   //file exists, reading and loading
-    //   Serial.println("reading config file");
-    //   File configFile = LittleFS.open("/config.json", "r");
-    //   if (configFile) {
-    //     Serial.println("opened config file");
-    //     size_t size = configFile.size();
-    //     // Allocate a buffer to store contents of the file.
-    //     std::unique_ptr<char[]> buf(new char[size]);
+  // if (LittleFS.begin(true)) {
+  //   Serial.println("mounted file system");
+  //   // if (LittleFS.exists("/config.json")) {
+  //   //   //file exists, reading and loading
+  //   //   Serial.println("reading config file");
+  //   //   File configFile = LittleFS.open("/config.json", "r");
+  //   //   if (configFile) {
+  //   //     Serial.println("opened config file");
+  //   //     size_t size = configFile.size();
+  //   //     // Allocate a buffer to store contents of the file.
+  //   //     std::unique_ptr<char[]> buf(new char[size]);
 
-    //     configFile.readBytes(buf.get(), size);
-    //     DynamicJsonDocument json(1024);
-    //     DeserializationError error = deserializeJson(json, buf.get());
-    //     serializeJson(json, Serial);
-    //     if (!error) {
-    //       Serial.println("\nparsed json");
+  //   //     configFile.readBytes(buf.get(), size);
+  //   //     DynamicJsonDocument json(1024);
+  //   //     DeserializationError error = deserializeJson(json, buf.get());
+  //   //     serializeJson(json, Serial);
+  //   //     if (!error) {
+  //   //       Serial.println("\nparsed json");
 
-    //       if (json.containsKey("hostname")) strncpy(host_name, json["hostname"], 20);
-    //       if (json.containsKey("passcode")) strncpy(passcode, json["passcode"], 20);
-    //       if (json.containsKey("port_str")) {
-    //         strncpy(port_str, json["port_str"], 6);
-    //         port = atoi(json["port_str"]);
-    //       }
-    //       if (json.containsKey("ip")) strncpy(static_ip, json["ip"], 16);
-    //       if (json.containsKey("gw")) strncpy(static_gw, json["gw"], 16);
-    //       if (json.containsKey("sn")) strncpy(static_sn, json["sn"], 16);
-    //       if (json.containsKey("dns")) strncpy(static_dns, json["dns"], 16);
-    //     } else {
-    //       Serial.println("failed to load json config");
-    //     }
-    //   }
-    // }
-  } else {
-    Serial.println("failed to mount FS");
-  }
+  //   //       if (json.containsKey("hostname")) strncpy(host_name, json["hostname"], 20);
+  //   //       if (json.containsKey("passcode")) strncpy(passcode, json["passcode"], 20);
+  //   //       if (json.containsKey("port_str")) {
+  //   //         strncpy(port_str, json["port_str"], 6);
+  //   //         port = atoi(json["port_str"]);
+  //   //       }
+  //   //       if (json.containsKey("ip")) strncpy(static_ip, json["ip"], 16);
+  //   //       if (json.containsKey("gw")) strncpy(static_gw, json["gw"], 16);
+  //   //       if (json.containsKey("sn")) strncpy(static_sn, json["sn"], 16);
+  //   //       if (json.containsKey("dns")) strncpy(static_dns, json["dns"], 16);
+  //   //     } else {
+  //   //       Serial.println("failed to load json config");
+  //   //     }
+  //   //   }
+  //   // }
+  // } else {
+  //   Serial.println("failed to mount FS");
+  // }
 
   // WiFiManagerParameter custom_hostname("hostname", "Choose a hostname to this IR Controller", host_name, 20);
   // wifiManager.addParameter(&custom_hostname);
@@ -712,7 +686,7 @@ size_t currentSize = jsf.size();
 int currentError = jsf.getWriteError();
 Serial.printf("  Checkpoint 1: Size before flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
 jsf.flush(); // Versuch, hier schon zu flushen
-delay(50); // <-- NEU: Kleine Verzögerung (z.B. 50ms) hinzufügen
+delay(50); // <-- Kleine Verzögerung
 currentSize = jsf.size();
 currentError = jsf.getWriteError();
 Serial.printf("  Checkpoint 1: Size after flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
@@ -733,7 +707,7 @@ void generateAndWriteJavaScript() {
   if (!LittleFS.exists("/js")) {
     if (LittleFS.mkdir("/js")) {
       Serial.println("Created /js directory.");
-      delay(50); // <-- NEU: Kleine Verzögerung (z.B. 50ms) hinzufügen
+      delay(50); // Kleine Verzögerung
     } else {
       Serial.println("ERROR: Failed to create /js directory!");
       // Fehlerbehandlung? Hier könnte man anhalten oder weitermachen und hoffen.
@@ -744,20 +718,21 @@ void generateAndWriteJavaScript() {
 
   File jsFile = LittleFS.open("/js/scripts.js", "w");
 
-  // --- NEU: Verbesserte Prüfung nach open ---
+  // --- Verbesserte Prüfung nach open ---
   if (!jsFile || jsFile.isDirectory()) { // Prüfen, ob es eine gültige Datei zum Schreiben ist
     Serial.println("ERROR: Failed to open /js/scripts.js for writing (invalid file handle or directory)!");
     if (jsFile) jsFile.close(); // Schließen, falls es ein Verzeichnis war
     return; // Funktion abbrechen
   }
-  // --- ENDE NEU ---
   Serial.println("  File /js/scripts.js opened for writing."); // Bestätigung hinzufügen
 
-  size_t written_chunk = jsFile.print(F("/* --- Helper Functions --- */\n")); // Beispiel
-  Serial.printf("  Bytes written by first print: %d\n", written_chunk);
-  if (written_chunk == 0) {
-    Serial.println("  !!! WARNING: First jsFile.print() returned 0 bytes!");
-  }
+  size_t written_chunk = 0;
+
+  // size_t written_chunk = jsFile.print(F("/* --- Helper Functions --- */\n"));
+  // Serial.printf("  Bytes written by first print: %d\n", written_chunk);
+  // if (written_chunk == 0) {
+  //   Serial.println("  !!! WARNING: First jsFile.print() returned 0 bytes!");
+  // }
 
   // --- Schreibe den JavaScript-Code in die Datei ---
   // ... (alle jsFile.print() Aufrufe bleiben unverändert) ...
@@ -766,6 +741,7 @@ void generateAndWriteJavaScript() {
   // Wichtig: Verwende jsFile.print() oder jsFile.println()
 
   // 1. Helper-Funktion: setButtonState
+  jsFile.print(F("/* --- Helper Functions --- */\n"));
   jsFile.print("function setButtonState(button, state, resetDelay = 750) {\n");
   jsFile.print("  if (!button) return;\n");
   jsFile.print("  button.classList.remove('btn-warning', 'btn-success', 'btn-danger');\n");
@@ -856,15 +832,12 @@ void generateAndWriteJavaScript() {
 
   // 4a. Remote Button Handler
   jsFile.print("  /* Remote Button Handler */\n");
-  jsFile.print("  console.log('Attempting to find #remote-buttons...');\n"); // <-- NEU
+  jsFile.print("  console.log('Attempting to find #remote-buttons...');\n");
   jsFile.print("  const remoteButtonsContainer = document.getElementById('remote-buttons');\n");
-    // --- NEUE DEBUG-ZEILE ---
-    jsFile.print("  console.log('Value of remoteButtonsContainer:', remoteButtonsContainer);\n");
-    // --- ENDE NEUE DEBUG-ZEILE ---
   jsFile.print("  if (remoteButtonsContainer) {\n");
-  jsFile.print("    console.log('#remote-buttons found. Attaching listener...');\n"); // <-- NEU
+  jsFile.print("    console.log('#remote-buttons found. Attaching listener...');\n");
   jsFile.print("    remoteButtonsContainer.addEventListener('click', function(event) {\n");
-  jsFile.print("      console.log('Click detected inside container.');\n"); // <-- NEU
+  jsFile.print("      console.log('Click detected inside container.');\n");
   jsFile.print("      if (event.target.classList.contains('remote-button')) {\n");
   jsFile.print("        event.preventDefault();\n");
   jsFile.print("        const button = event.target;\n");
@@ -931,7 +904,7 @@ void generateAndWriteJavaScript() {
   jsFile.print("        console.log('Sending Test Single IR:', irData);\n");
   jsFile.print("        const urlParams = new URLSearchParams(irData).toString();\n");
   jsFile.print("        fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
-  jsFile.print("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); alert(response.ok ? 'Test Single IR OK!' : 'Error sending test command.'); if (!response.ok) console.error('Test Single IR GET Error:', response.status); return response.text(); })\n");
+  jsFile.print("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Test Single IR GET Error:', response.status); return response.text(); })\n");
   jsFile.print("        .then(data => console.log('Server response test single IR:', data))\n");
   jsFile.print("        .catch(error => { console.error('Fetch error test single IR:', error); setButtonState(testSendButton, 'error'); alert('Network Error (Test Single IR).'); })\n");
   jsFile.print("        .finally(() => { testSendButton.textContent = originalTestButtonText; });\n");
@@ -949,20 +922,20 @@ void generateAndWriteJavaScript() {
   jsFile.print("    else { const singleRadio = document.querySelector('input[name=\"btn_isMacro\"][value=\"0\"]'); if (singleRadio && singleRadio.checked) { toggleButtonFields(false); } else { toggleButtonFields(false); } }\n");
   jsFile.print("  }\n\n");
 
-  // jsFile.print("});\n"); // <-- WIEDER HINZUGEFÜGT (Ende DOMContentLoaded Wrapper)
+  // jsFile.print("});\n"); //(Ende DOMContentLoaded Wrapper)
 
 
     // --- Datei schließen und Erfolg/Fehler prüfen ---
     int writeError = jsFile.getWriteError(); // Fehlerstatus holen VOR dem Schließen
     size_t bytesWritten = jsFile.size();     // Größe holen VOR dem Schließen
-    Serial.printf("  Flushing file before close...\n"); // NEU
+    Serial.printf("  Flushing file before close...\n");
     jsFile.flush();
     jsFile.close();                          // Datei schließen
 
   
     Serial.printf("  Finished writing attempts. Bytes reported before close: %d, Write Error Code: %d\n", bytesWritten, writeError); // Mehr Debugging
 
-    // --- NEU: Verbesserte Erfolgsprüfung ---
+    // --- Verbesserte Erfolgsprüfung ---
   if (writeError == 0 && bytesWritten > 0) {
     Serial.printf("Successfully wrote %d bytes to /js/scripts.js\n", bytesWritten);
     // Optional: Datei nach dem Schließen erneut öffnen und Größe prüfen
@@ -990,7 +963,6 @@ void generateAndWriteJavaScript() {
         }
     }
   }
-  // --- ENDE NEU ---
 
   Serial.printf("  Heap after JS write: %u\n", ESP.getFreeHeap());
 
@@ -1054,20 +1026,21 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("            <input type='hidden' name='button_id' value='" + String(buttonId) + "'>\n");
 
   // --- Formularfelder ---
-  // --- KORREKTUR: Name ---
   response->print("            <div class='form-group'>\n");
-  response->print("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n"); // Korrektes Label/for
+  response->print("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n");
   response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label' value='" + String(buttonData.name) + "' required></div>\n"); // Korrektes Input-Feld
   response->print("            </div>\n");
 
-    // --- NEU: Button Type Selector ---
+    // --- Button Type Selector ---
   response->print("            <div class='form-group'>\n");
   response->print("              <label class='col-sm-2 control-label'>Button Type</label>\n");
   response->print("              <div class='col-sm-10'>\n");
+
   // Radio für Single Command (Value 0)
   response->print("                <label class='radio-inline'><input type='radio' name='btn_isMacro' value='0' ");
   if (!buttonData.isMacro) response->print("checked ");
   response->print("onclick='toggleButtonFields(false)'> Single IR Command</label>\n");
+
   // Radio für Macro (Value 1)
   response->print("                <label class='radio-inline'><input type='radio' name='btn_isMacro' value='1' ");
   if (buttonData.isMacro) response->print("checked ");
@@ -1078,18 +1051,10 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   // --- Container für Single IR Felder ---
   response->print("            <div id='single-ir-fields' style='display: " + String(!buttonData.isMacro ? "block" : "none") + ";'>\n");
 
-  // --- KORREKTUR: Type ---
   response->print("            <div class='form-group'>\n");
-  response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n"); // Korrektes Label/for
-  response->print("              <div class='col-sm-10'>" + generateTypeDropdownHtml(prefix + "type", String(buttonData.type)) + "</div>\n"); // Korrekte Funktion
+  response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
+  response->print("              <div class='col-sm-10'>" + generateTypeDropdownHtml(prefix + "type", String(buttonData.type)) + "</div>\n");
   response->print("            </div>\n");
-
-  // // Type
-  // response->print("            <div class='form-group'>\n");
-  // response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
-  // // --- KORREKTUR: Globale Funktion aufrufen ---
-  // response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
-  // response->print("            </div>\n");
 
   // Data
   response->print("            <div class='form-group'>\n");
@@ -1115,20 +1080,19 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "repeat' name='" + prefix + "repeat' value='" + String(buttonData.repeat) + "' min='1'></div>\n");
   response->print("            </div>\n");
 
-  // --- KORREKTUR: Output Pin (Nur einmal) ---
   response->print("            <div class='form-group'>\n");
-  response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n"); // Korrektes Label/for
-  response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n"); // Korrekte Funktion
+  response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n"); 
+  response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
   response->print("            </div>\n");
 
-  // --- Submit/Cancel/Test Buttons --- // Geändert
+  // --- Submit/Cancel/Test Buttons --- 
   response->print("            <div class='form-group'>\n");
   response->print("              <div class='col-sm-offset-2 col-sm-10'>\n");
   response->print("                <button type='submit' class='btn btn-success'>Save Button</button>\n");
-  // --- NEU: Test Send Button ---
+  // --- Test Send Button ---
   response->print("                <button type='button' id='test-send-button' class='btn btn-info' style='margin-left: 10px;'>Test Send</button>\n");
-  // --- ENDE NEU ---
-  response->print("                <a href='/buttons' class='btn btn-default' style='margin-left: 10px;'>Cancel</a>\n"); // Style für Abstand
+
+  response->print("                <a href='/buttons' class='btn btn-default' style='margin-left: 10px;'>Cancel</a>\n");
   response->print("              </div>\n");
   response->print("            </div>\n");
 
@@ -1136,7 +1100,7 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("        </div>\n");
   response->print("      </div>\n");
 
-  // --- NEU: Container und Feld für Macro JSON ---
+  // --- Container und Feld für Macro JSON ---
   response->print("            <div id='macro-json-field' style='display: " + String(buttonData.isMacro ? "block" : "none") + ";'>\n");
   response->print("              <div class='form-group'>\n");
   response->print("                <label for='" + prefix + "macroJson' class='col-sm-2 control-label'>Macro JSON</label>\n");
@@ -1148,7 +1112,7 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("            </div>\n"); // Ende macro-json-field
 }
 
-// --- NEU: Handler für Backup (Download) ---
+// --- Handler für Backup (Download) ---
 void handleBackup(AsyncWebServerRequest *request) {
   Serial.println("Handling /backup request...");
   if (LittleFS.exists("/buttons.json")) {
@@ -1157,14 +1121,13 @@ void handleBackup(AsyncWebServerRequest *request) {
     // Der letzte Parameter 'true' setzt Content-Disposition: attachment
     response->addHeader("Content-Disposition", "attachment; filename=\"buttons.json\"");
     request->send(response);
-    Serial.println("  Sent buttons.json for download.");
   } else {
     Serial.println("  ERROR: /buttons.json not found for backup.");
     request->send(404, "text/plain", "ERROR: buttons.json not found.");
   }
 }
 
-// --- NEU: Handler für Datei-Upload (wird während des Uploads aufgerufen) ---
+// --- Handler für Datei-Upload (wird während des Uploads aufgerufen) ---
 void handleRestoreUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
   if (!index) { // Erster Chunk der Datei
     Serial.printf("Upload Start: %s\n", filename.c_str());
@@ -1196,7 +1159,6 @@ void handleRestoreUpload(AsyncWebServerRequest *request, String filename, size_t
               // Hier könnte man den Upload abbrechen
           }
       }
-      // Serial.printf("  Written chunk: %d bytes\n", len); // Optional: Debugging
   }
 
 
@@ -1214,7 +1176,7 @@ void handleRestoreUpload(AsyncWebServerRequest *request, String filename, size_t
   }
 }
 
-// --- NEU: Handler für die POST-Anfrage nach dem Upload ---
+// --- Handler für die POST-Anfrage nach dem Upload ---
 void handleRestoreRequest(AsyncWebServerRequest *request) {
     // Dieser Handler wird aufgerufen, NACHDEM handleRestoreUpload fertig ist.
     // Wir senden hier nur eine Bestätigung und leiten zurück.
@@ -1294,7 +1256,7 @@ if (buttonId >= 0 && buttonId < buttonConfigs.size()) {
 void handleSaveButton(AsyncWebServerRequest *request) {
   Serial.println("==> handleSaveButton: Entered function.");
 
-  // --- NEUER ANSATZ: Parameter manuell per Index suchen ---
+  // -- manuell per Index suchen ---
   int params = request->params();
   Serial.printf("    Scanning %d parameters...\n", params);
 
@@ -1307,7 +1269,6 @@ void handleSaveButton(AsyncWebServerRequest *request) {
   String address = "";
   String repeatStr = ""; // Repeat als String lesen
   String outStr = "";    // Out als String lesen
-  // --- NEU ---
   String isMacroStr = "";
   String macroJson = "";
   bool buttonIdFound = false;
@@ -1327,7 +1288,7 @@ void handleSaveButton(AsyncWebServerRequest *request) {
       } else if (paramName.equals("btn_name")) {
         name = paramValue;
       } 
-      // --- NEU: Makro-Felder lesen ---
+      // --- Makro-Felder lesen ---
       else if (paramName.equals("btn_isMacro")) { isMacroStr = paramValue; }
       else if (paramName.equals("btn_macroJson")) { macroJson = paramValue; }
       
@@ -1349,7 +1310,6 @@ void handleSaveButton(AsyncWebServerRequest *request) {
     }
   }
   Serial.println("    Parameter scan complete.");
-  // --- ENDE NEUER ANSATZ ---
 
   // --- Prüfung, ob button_id gefunden wurde ---
   if (!buttonIdFound) {
@@ -1364,17 +1324,6 @@ void handleSaveButton(AsyncWebServerRequest *request) {
   int length = lengthStr.toInt();
   int repeat = repeatStr.toInt();
   int out = outStr.toInt();
-
-  Serial.printf("    Button ID received: %d\n", buttonId);
-  Serial.println("    Read Parameters (manually scanned):");
-  Serial.println("      Name: '" + name + "'");
-  Serial.println("      Type: '" + type + "'");
-  Serial.println("      Data: '" + data + "'");
-  Serial.println("      Length: " + String(length));
-  Serial.println("      Address: '" + address + "'");
-  Serial.println("      Repeat: " + String(repeat));
-  Serial.println("      Out: " + String(out));
-  Serial.printf("    Button ID: %d, Is Macro: %s\n", buttonId, isMacro ? "Yes" : "No");
   
   name.trim();
 
@@ -1511,10 +1460,7 @@ void handleSaveButton(AsyncWebServerRequest *request) {
 }
 
 //+=============================================================================
-// Handler for Button Configuration Overview Page (NEU)
-//
-//+=============================================================================
-// Handler for Button Configuration Overview Page (Angepasst für mehr Spalten)
+// Handler for Button Configuration Overview Page
 //
 void handleButtonConfigPage(AsyncWebServerRequest *request) {
   Serial.println("Connection received endpoint '/buttons' (GET)");
@@ -1544,22 +1490,18 @@ void handleButtonConfigPage(AsyncWebServerRequest *request) {
       }
   }
 
-  response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n"); // table-condensed für kompakteren Look
-  // --- KORREKTUR: Tabellenkopf erweitern ---
-  response->print("            <thead><tr><th>Name</th><th>Mode</th><th>Type</th><th>Data/Macro</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Actions</th></tr></thead>\n"); // Mode hinzugefügt, Data umbenannt
+  response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n");
+  response->print("            <thead><tr><th>Name</th><th>Mode</th><th>Type</th><th>Data/Macro</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Actions</th></tr></thead>\n");
  response->print("            <tbody>\n");
 
  if (!buttonConfigs.empty()) {
   for (size_t i = 0; i < buttonConfigs.size(); ++i) {
     const auto& button = buttonConfigs[i];
-    // if (!button.configured) continue; // Überspringe nicht konfigurierte (Optional, falls du sie doch anzeigen willst)
 
     response->print("              <tr>\n");
     response->print("                <td>" + String(button.name) + "</td>\n"); // Name
-
-    // --- KORREKTUR: "Mode"-Spalte hier hinzufügen ---
     response->print("                <td>" + String(button.isMacro ? "Macro" : "Single") + "</td>\n");
-    // --- ENDE KORREKTUR ---
+
 
     // Jetzt die restlichen Spalten basierend auf dem Modus
     if (button.isMacro) {
@@ -1593,7 +1535,7 @@ void handleButtonConfigPage(AsyncWebServerRequest *request) {
         response->print("                <td><code>" + outText + "</code></td>\n"); // Out
     }
 
-    // Actions Spalte (bleibt gleich)
+    // Actions Spalte
     response->print("                <td>\n");
     response->print("                  <a href='/editbutton?id=" + String(i) + "' class='btn btn-xs btn-warning' style='margin-right: 3px;'>Edit</a>\n");
     response->print("                  <a href='/deletebutton?id=" + String(i) + "' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure you want to delete button \\'" + String(button.name) + "\\'?\");'>Delete</a>\n");
@@ -1601,7 +1543,6 @@ void handleButtonConfigPage(AsyncWebServerRequest *request) {
     response->print("              </tr>\n");
   }
 } else {
-  // --- KORREKTUR: colspan an neue Spaltenanzahl anpassen (9) --- // War schon korrekt bei dir
   response->print("              <tr><td colspan='9' class='text-center'><em>No buttons configured.</em></td></tr>\n");
 }
 
@@ -1638,7 +1579,6 @@ void handleSaveButtons(AsyncWebServerRequest *request) {
     String address = request->hasParam(prefix + "address") ? request->getParam(prefix + "address")->value() : "";
     int repeat = request->hasParam(prefix + "repeat") ? request->getParam(prefix + "repeat")->value().toInt() : 1; // Default 1 if missing
     int out = request->hasParam(prefix + "out") ? request->getParam(prefix + "out")->value().toInt() : 1;       // Default 1 if missing
-
 
     // Trim whitespace from name
     name.trim();
@@ -1709,7 +1649,6 @@ void handleSendButton(AsyncWebServerRequest *request) {
     request->send(400, "text/plain", "Bad Request: Missing required IR parameters (type, data, length).");
     return;
   }
-  Serial.println("    Required parameters present.");
 
   String type = request->getParam("type")->value();
   String dataStr = request->getParam("data")->value();
@@ -1723,25 +1662,13 @@ void handleSendButton(AsyncWebServerRequest *request) {
           address = strtoul(("0x" + addressStr).c_str(), 0, 0);
       }
   }
-  // --- KORREKTUR: Stelle sicher, dass 'repeat' hier deklariert wird ---
+
   int repeat = request->hasParam("repeat") ? request->getParam("repeat")->value().toInt() : 1;
   int out = request->hasParam("out") ? request->getParam("out")->value().toInt() : 1;
 
-  // --- KORREKTUR: Deklaration für rdelay, pulse, pdelay hinzufügen ---
   int rdelay = 1000; // Default repeat delay
   int pulse = 1;     // Default pulse count
   int pdelay = 100;  // Default pulse delay
-
-  // --- Parameter ausgeben ---
-  Serial.println("    Read Parameters:");
-  Serial.println("      Type: " + type);
-  Serial.println("      Data: " + dataStr);
-  Serial.println("      Length: " + String(len));
-  Serial.println("      Address: " + String(address, HEX));
-  Serial.println("      Repeat: " + String(repeat)); // Jetzt sollte 'repeat' bekannt sein
-  Serial.println("      Out: " + String(out));
-  // --- ENDE Parameter ausgeben ---
-
 
   // Validate inputs (basic)
   if (type.length() == 0 || dataStr.length() == 0 || len == 0) {
@@ -1756,15 +1683,15 @@ void handleSendButton(AsyncWebServerRequest *request) {
 // --- Trigger IR Blast ---
 Serial.println("    -> Calling irblast...");
 
-Serial.println("      Setting LED LOW..."); // NEU
+Serial.println("      Setting LED LOW...");
 digitalWrite(ledpin, LOW);
-Serial.println("      LED set LOW."); // NEU
+Serial.println("      LED set LOW.");
 
-Serial.println("      Attaching ticker..."); // NEU
+Serial.println("      Attaching ticker...");
 ticker.attach(0.5, disableLed);
-Serial.println("      Ticker attached."); // NEU
+Serial.println("      Ticker attached.");
 
-Serial.println("      Now calling irblast function..."); // NEU
+Serial.println("      Now calling irblast function...");
 irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(out), out);
 
   // --- Send Success Response ---
@@ -1778,7 +1705,6 @@ irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(o
 void handleSendIr(AsyncWebServerRequest *request) {
   Serial.println("Connection received endpoint '/sendir' (POST)");
 
-  // --- NEUER ANSATZ: Parameter manuell per Index suchen ---
   int params = request->params();
   Serial.printf("    Scanning %d parameters (handleSendIr)...\n", params);
 
@@ -1797,7 +1723,6 @@ void handleSendIr(AsyncWebServerRequest *request) {
     if(p->isPost()){
       String paramName = p->name();
       String paramValue = p->value();
-      Serial.printf("      POST[%s]: %s\n", paramName.c_str(), paramValue.c_str()); // Debug
 
       // Werte basierend auf dem Namen zuweisen
       if (paramName.equals("type")) {
@@ -1821,7 +1746,6 @@ void handleSendIr(AsyncWebServerRequest *request) {
     }
   }
   Serial.println("    Parameter scan complete (handleSendIr).");
-  // --- ENDE NEUER ANSATZ ---
 
   // --- Prüfung, ob erforderliche Parameter gefunden wurden ---
   if (!typeFound || !dataFound || !lengthFound) {
@@ -1847,16 +1771,6 @@ void handleSendIr(AsyncWebServerRequest *request) {
   int rdelay = 1000;
   int pulse = 1;
   int pdelay = 100;
-
-  // --- Parameter ausgeben (zum Debuggen) ---
-  Serial.println("    Read Parameters (handleSendIr - manually scanned):");
-  Serial.println("      Type: '" + type + "'");
-  Serial.println("      Data: '" + dataStr + "'");
-  Serial.println("      Length: " + String(len));
-  Serial.println("      Address: " + String(address, HEX));
-  Serial.println("      Repeat: " + String(repeat));
-  Serial.println("      Out: " + String(out));
-  // --- ENDE Parameter ausgeben ---
 
   // Validate inputs (basic)
   if (len == 0 || dataStr.length() == 0) { // type wurde schon geprüft
@@ -1884,7 +1798,7 @@ void handleSendIr(AsyncWebServerRequest *request) {
 }
 
 
-// Beispiel für einen Not Found Handler
+// Not Found Handler
 void handleNotFound(AsyncWebServerRequest *request) {
   request->send(404, "text/plain", "Seite nicht gefunden");
 }
@@ -1897,7 +1811,31 @@ void setup() {
   // Initialize serial
   Serial.begin(115200);
   Serial.println("\n\nBooting..."); // Frühe Meldung
-  Serial.printf("Free Heap at start: %u\n", ESP.getFreeHeap()); // Speicher ganz am Anfang
+  
+  // --- TEMPORÄRER CODE ZUM FORMATIEREN ---
+// Diesen Block einkommentieren, EINMAL flashen & laufen lassen,
+// dann ESP manuell stoppen, Block wieder auskommentieren und erneut flashen!
+/* 
+Serial.println("Attempting to unmount and format LittleFS... THIS WILL ERASE ALL SAVED DATA!");
+LittleFS.end(); // Sicherstellen, dass es unmounted ist
+delay(100);     // Kurze Pause
+bool formatted = LittleFS.format();
+if (formatted) {
+  Serial.println("LittleFS formatted successfully. Halting now. Please stop/reset manually.");
+  delay(1000); // Gib der Meldung Zeit
+  while(1) { delay(100); } // Anhalten
+} else {
+  Serial.println("!!! LittleFS format failed. Halting. !!!");
+  while(1) { delay(100); } // Anhalten, wenn Formatierung fehlschlägt
+}
+ */
+// --- ENDE TEMPORÄRER CODE ---
+
+  if (!LittleFS.begin(true)) { // Mount FS (true = format if mount failed)
+    Serial.println("LittleFS Mount Failed! Halting.");
+    while(1); // Anhalten, da JS nicht generiert werden kann
+  }
+  Serial.println("LittleFS Mounted.");
 
   // set led pin as output
   pinMode(ledpin, OUTPUT);
@@ -1931,49 +1869,6 @@ void setup() {
   // --- ENDE NEU ---
 
   Serial.println("WiFi configuration complete");
-  Serial.printf("Free Heap after WiFi: %u\n", ESP.getFreeHeap()); // Speicher nach WiFi
-  
-  // --- TEMPORÄRER CODE ZUM FORMATIEREN ---
-  // Diesen Block einkommentieren, EINMAL flashen & laufen lassen,
-  // dann wieder auskommentieren und erneut flashen!
-/* 
-  Serial.println("Attempting to format LittleFS... THIS WILL ERASE ALL SAVED DATA (WiFi, Buttons)!");
-  bool formatted = LittleFS.format();
-  if (formatted) {
-    LittleFS.begin(true);
-    Serial.println("LittleFS formatted successfully.");
-    while(1); // Anhalten
-  } else {
-    Serial.println("!!! LittleFS format failed. Halting. !!!");
-    while(1); // Anhalten, wenn Formatierung fehlschlägt
-  }
-    */
-  // --- ENDE TEMPORÄRER CODE ---
-
-  // --- TEMPORÄRER CODE ZUM FORMATIEREN ---
-// Diesen Block einkommentieren, EINMAL flashen & laufen lassen,
-// dann ESP manuell stoppen, Block wieder auskommentieren und erneut flashen!
-/* 
-Serial.println("Attempting to unmount and format LittleFS... THIS WILL ERASE ALL SAVED DATA!");
-LittleFS.end(); // Sicherstellen, dass es unmounted ist
-delay(100);     // Kurze Pause
-bool formatted = LittleFS.format();
-if (formatted) {
-  Serial.println("LittleFS formatted successfully. Halting now. Please stop/reset manually.");
-  delay(1000); // Gib der Meldung Zeit
-  while(1) { delay(100); } // Anhalten
-} else {
-  Serial.println("!!! LittleFS format failed. Halting. !!!");
-  while(1) { delay(100); } // Anhalten, wenn Formatierung fehlschlägt
-}
- */
-// --- ENDE TEMPORÄRER CODE ---
-
-  if (!LittleFS.begin(true)) { // Mount FS (true = format if mount failed)
-    Serial.println("LittleFS Mount Failed! Halting.");
-    while(1); // Anhalten, da JS nicht generiert werden kann
-  }
-  Serial.println("LittleFS Mounted.");
 
   // --- NEU: JS generieren und schreiben ---
   generateAndWriteJavaScript();
@@ -2050,7 +1945,7 @@ if (formatted) {
     sendHomePage(request); // 200 wird innerhalb von sendHomePage/sendHeader gesetzt
   });
 
-    // --- WICHTIG: JS Handler registrieren ---
+// --- WICHTIG: JS Handler registrieren ---
 // --- ALT (Regex-Handler) ---
 /*
 server->on("^\\/js\\/(.+)$", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -2312,10 +2207,10 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
         if (state == currentState) {
           Serial.println("Not sending command to " + device + ", already in state " + state);
           if (simple) {
-            // sendCorsHeaders(); // ENTFERNT
-            request->send(200, "text/html", "Not sending command to " + device + ", already in state " + String(state)); // String() hinzugefügt
+            // sendCorsHeaders();
+            request->send(200, "text/html", "Not sending command to " + device + ", already in state " + String(state));
           } else {
-            sendHomePage(request, "Not sending command to " + device + ", already in state " + String(state), "Warning", 2); // Übergibt request, String() hinzugefügt
+            sendHomePage(request, "Not sending command to " + device + ", already in state " + String(state), "Warning", 2);
           }
           return; // Wichtig: Handler hier beenden
         } else {
@@ -2330,7 +2225,7 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
 
     // --- Simple Success-Antwort *vor* dem Senden senden, wenn simple=1 ---
     if (simple) {
-      // sendCorsHeaders(); // ENTFERNT
+      // sendCorsHeaders();
       request->send(200, "text/html", "Success, code sent");
     }
 
@@ -2407,7 +2302,7 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   }); // End request->on("/received")
 
 
-  // --- NEU: Routen für Backup und Restore hinzufügen ---
+  // --- Routen für Backup und Restore hinzufügen ---
   server->on("/backup", HTTP_GET, handleBackup);
 
   // Handler für die Seite, die das Upload-Formular anzeigt (angenommen /buttons)
@@ -2417,10 +2312,8 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   // Der erste Handler (handleRestoreRequest) wird nach Abschluss des Uploads aufgerufen.
   // Der zweite Handler (handleRestoreUpload) wird während des Uploads für jeden Datenchunk aufgerufen.
   server->on("/restore", HTTP_POST, handleRestoreRequest, handleRestoreUpload);
-  // --- ENDE NEU ---
 
-
-    // --- NEUE/GEÄNDERTE BUTTON HANDLER ---
+    // --- BUTTON HANDLER ---
     server->on("/buttons", HTTP_GET, handleButtonConfigPage);      // Zeigt die Übersicht
     server->on("/addbutton", HTTP_GET, handleAddButtonPage);       // Zeigt leeres Formular
     server->on("/editbutton", HTTP_GET, handleEditButtonPage);     // Zeigt befülltes Formular
@@ -2440,19 +2333,19 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   irrecv.enableIRIn();
   Serial.println("Ready to send and receive IR signals");
 
-  // --- NEU: SSE Initialisierung GANZ AM ENDE ---
+  // --- SSE Initialisierung ---
   if (server != nullptr) {
-    Serial.println("Creating AsyncEventSource at end of setup..."); // NEU
+    Serial.println("Creating AsyncEventSource at end of setup...");
     events = new AsyncEventSource("/events");
     if (events == nullptr) {
         Serial.println("FATAL ERROR: Failed to allocate memory for AsyncEventSource!");
         ESP.restart();
     } else {
         Serial.println("AsyncEventSource object created.");
-        Serial.printf("Free Heap after AsyncEventSource (end of setup): %u\n", ESP.getFreeHeap()); // NEU
+        Serial.printf("Free Heap after AsyncEventSource (end of setup): %u\n", ESP.getFreeHeap());
 
         // onConnect und addHandler jetzt auch aktivieren
-        events->onConnect([](AsyncEventSourceClient *client){ // Pfeil ->
+        events->onConnect([](AsyncEventSourceClient *client){ 
           if(client->lastId()){
             Serial.printf("EventSource Client Reconnected! Last ID: %u\n", client->lastId());
           } else {
@@ -2460,14 +2353,13 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
           }
         });
 
-        server->addHandler(events); // KEIN '&' mehr
+        server->addHandler(events);
         Serial.println("EventSource handler registered at /events");
     }
 } else {
     Serial.println("FATAL ERROR: Server object is null, cannot create EventSource!");
     ESP.restart();
 }
-// --- ENDE NEU ---
 
 }
 
@@ -2504,7 +2396,6 @@ int rokuCommand(String ip, String data, int repeat, int rdelay) {
     if (r + 1 < repeat) delay(rdelay);
   }
 
-  // +++ NEUE ZEILEN (nach dem Loop) +++
   // Store info about the *last* command sent in the loop
   copyCode(last_send_4, last_send_5);
   copyCode(last_send_3, last_send_4);
@@ -2519,7 +2410,6 @@ int rokuCommand(String ip, String data, int repeat, int rdelay) {
   last_send.valid = true;
   last_send.repeat = repeat; // Store repeat count
   last_send.out = 1; // Default out pin for Roku
-  // +++ ENDE NEUE ZEILEN +++
 
   // Event senden (nachdem last_send aktualisiert wurde)
   sendCodeUpdateEvent("codeSent", last_send);
@@ -2613,15 +2503,15 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
           response->print("<div class='alert alert-danger'>Error: Could not save button configuration.</div>");
       } else if (status == "error_max_buttons") {
           response->print("<div class='alert alert-warning'>Warning: Maximum number of buttons reached. Could not add new button.</div>");
-      } else if (status == "error_invalid_json") { // NEU
+      } else if (status == "error_invalid_json") {
           response->print("<div class='alert alert-danger'>Error: Invalid JSON format in Macro field.</div>");
-      } else if (status == "error_json_not_array") { // NEU
+      } else if (status == "error_json_not_array") {
           response->print("<div class='alert alert-danger'>Error: Macro JSON must be a valid JSON array.</div>");
       }
-      // Füge hier ggf. weitere Statusmeldungen hinzu (z.B. für Restore)
+      // ggf. weitere Statusmeldungen hinzu (z.B. für Restore)
   }
 
-  // --- Backup/Restore Sektion (wie zuvor hinzugefügt) ---
+  // --- Backup/Restore Sektion ---
   response->print("          <hr><h2>Backup / Restore Configuration</h2>");
   response->print("          <div style='margin-bottom: 15px;'>");
   response->print("            <a href='/backup' class='btn btn-info' style='margin-right: 10px;'>Download Backup (buttons.json)</a>");
@@ -2703,7 +2593,6 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
 
 //+=============================================================================
 // Send header HTML (Async Version)
-//
 // Overload ohne httpcode
 void sendHeader(AsyncWebServerRequest *request) {
   Serial.println("Warning: sendHeader(request) called in AsyncResponseStream context. Use sendHeader(response).");
@@ -2758,8 +2647,6 @@ void sendHeader(AsyncResponseStream *response) {
 
 //+=============================================================================
 // Send footer HTML (AsyncResponseStream Version)
-//
-// Nimmt jetzt einen Zeiger auf den Response Stream entgegen
 void sendFooter(AsyncResponseStream *response) {
 // --- Uptime and Epoch ---
   // OLD Line that calls now():
@@ -2977,7 +2864,7 @@ void sendFooter(AsyncResponseStream *response) {
 
 //   yield(); // <-- ADD YIELD after initial scripts
 
-//  // --- NEU: JavaScript für Test Send Button ---
+//  // --- JavaScript für Test Send Button ---
 //  response->print("      <script>\n");
 //  response->print("        const testSendButton = document.getElementById('test-send-button');\n");
 //  response->print("        if (testSendButton) {\n"); // Nur ausführen, wenn der Button existiert
@@ -3077,9 +2964,8 @@ void sendFooter(AsyncResponseStream *response) {
 
 response->print("    </div>\n"); // Ende .container
 
-   // --- NEU: Lade das generierte Skript am Ende des Body ---
+   // --- Lade das generierte Skript am Ende des Body ---
    response->print("    <script src='/js/scripts.js'></script>\n");
-   // --- ENDE NEU --
 
  response->print("  </body>\n");
  response->print("</html>\n");
@@ -3105,7 +2991,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 // Hauptfunktion, die die Arbeit macht (AsyncResponseStream Version)
 void sendHomePage(AsyncWebServerRequest *request, String message, String header, int type, int httpcode) {
 
-  yield(); // <--- NEW: Yield IMMEDIATELY upon entry
+  yield(); // <--- Yield IMMEDIATELY upon entry
   Serial.println("--> Entered sendHomePage"); // Log entry
 
   // --- Erstelle den Response Stream ---
@@ -3115,39 +3001,12 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
       request->send(500, "text/plain", "Internal Server Error");
       return;
   }
-  Serial.println("    beginResponseStream OK");
 
-  Serial.println("    Calling sendHeader...");
-  Serial.printf("      Heap BEFORE sendHeader: %u\n", ESP.getFreeHeap());
   sendHeader(response);
-  Serial.printf("      Heap AFTER sendHeader: %u\n", ESP.getFreeHeap());
-  Serial.println("    sendHeader returned.");
 
-  // --- NEW TEST BLOCK ---
-  volatile int test_var = 0; // Simplest possible operation
-  Serial.println("    Minimal operation done.");
-  // yield(); // Temporarily remove yield
-
-  // Now try simplest stream operation
-  response->print(""); // Print an empty string (minimal stream interaction)
-  Serial.println("    Minimal stream print done.");
- Serial.printf("      Heap after minimal print: %u\n", ESP.getFreeHeap());
-
-  Serial.println("    Attempting yield..."); // Log before yield
   yield();
-  Serial.println("    Yield successful."); // Log after yield
-  Serial.printf("      Heap after yield: %u\n", ESP.getFreeHeap());
 
-  Serial.println("    Printing buttonMacroJsStore...");
-
-
-  // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN +++
-  // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN (Vector Version) +++
-  Serial.println("    Printing buttonMacroJsStore...");
-  // --- NEW: Log the size ---
-  Serial.printf("      Size of buttonMacroJsStore: %d bytes\n", buttonMacroJsStore.length());
-
-  // --- MODIFIED: Chunked Printing ---
+  // --- Chunked Printing ---
   response->print("          <script>\n");
 
   const size_t chunkSize = 512; // Print in 512-byte chunks (adjust if needed)
@@ -3162,7 +3021,6 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   // response->print(buttonMacroJsStore); // OLD: Print all at once (Remove/Comment this)
 
   response->print("          </script>\n");
-  Serial.println("    buttonMacroJsStore printed (chunked).");
   // yield(); // The yield inside the loop makes this one potentially redundant, but keep it for safety for now.
 
   Serial.println("    Starting button generation loop...");
@@ -3173,35 +3031,31 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN +++ // <--- Kommentar im Code
   response->print("      <div class='row'>\n");
   // HIER WIRD DAS DIV MIT DER ID ERZEUGT:
-  response->print("        <div class='col-md-12' id='remote-buttons'>\n"); // <--- HIER IST ES!
+  response->print("        <div class='col-md-12' id='remote-buttons'>\n"); 
   response->print("          <h3>Remote Buttons</h3>\n");
 
-  // --- NEW Debugging around vector access ---
-  Serial.printf("      Heap BEFORE vector check: %u\n", ESP.getFreeHeap());
-  Serial.printf("      Checking buttonConfigs.size() = %d\n", buttonConfigs.size()); // Check size first
-  Serial.println("      Checking if buttonConfigs is empty...");
+  // // --- Debugging around vector access ---
+  // Serial.printf("      Heap BEFORE vector check: %u\n", ESP.getFreeHeap());
+  // Serial.printf("      Checking buttonConfigs.size() = %d\n", buttonConfigs.size()); // Check size first
+  // Serial.println("      Checking if buttonConfigs is empty...");
   if (!buttonConfigs.empty()) {
-    Serial.println("      Vector is NOT empty. Entering loop."); // Log entry into loop block
+    // Serial.println("      Vector is NOT empty. Entering loop."); // Log entry into loop block
     for (size_t i = 0; i < buttonConfigs.size(); ++i) {
-      Serial.printf("      Loop iteration i=%d\n", i); // Log each iteration start
+      // Serial.printf("      Loop iteration i=%d\n", i); // Log each iteration start
       // --- Add heap check inside loop ---
       if (i % 2 == 0) { // Check heap every few iterations
-         Serial.printf("        Heap inside loop (i=%d): %u\n", i, ESP.getFreeHeap());
+        //  Serial.printf("        Heap inside loop (i=%d): %u\n", i, ESP.getFreeHeap());
       }
       // --- End heap check ---
       const auto& button = buttonConfigs[i];
       if (!button.configured) {
-         Serial.printf("        Skipping button %d (not configured)\n", i);
+        //  Serial.printf("        Skipping button %d (not configured)\n", i);
          continue;
       }
 
       String buttonId = "btn_" + String(i);
 
-                // // --- START TEMPORARY SIMPLIFICATION ---
-                // String buttonHtml = "            <button class='btn btn-secondary btn-sm' style='margin: 2px;'>Test " + String(i) + "</button>\n";
-                // // --- END TEMPORARY SIMPLIFICATION ---
-      
-                // --- ORIGINAL buttonHtml GENERATION COMMENTED OUT ---
+                // --- buttonHtml ---
                 String buttonHtml = "            <button id='" + buttonId + "' class='btn btn-primary btn-lg remote-button' style='margin: 5px;' ";
                 buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
                 if (!button.isMacro) {
@@ -3215,32 +3069,22 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
                 buttonHtml += ">";
                 buttonHtml += String(button.name);
                 buttonHtml += "</button>\n";
-                // --- END ORIGINAL ---
       
                 response->print(buttonHtml);
-                yield(); // Keep yield inside loop
+                yield();
               }
               Serial.println("    Button generation loop finished.");
             } else {
 
-    Serial.println("      Vector IS empty."); // Log if empty
     response->print("            <p><em>No remote buttons configured yet.</em></p>\n");
-    Serial.println("    No buttons to generate.");
   }
-  Serial.printf("      Heap AFTER vector check/loop: %u\n", ESP.getFreeHeap());
-  // --- END Debugging ---
 
-  // --- Add log BEFORE the problematic yield ---
-  Serial.println("    Attempting yield AFTER button loop...");
-  yield(); // <--- This is the yield that seems to be crashing
-  Serial.println("    Yield AFTER button loop successful.");
+  yield();
 
     // Link zum Konfigurieren und Ende des Divs
     response->print("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
     response->print("          </div>\n"); // <-- Ende von <div id='remote-buttons'>
-    // response->print("        </div>\n");
     response->print("      </div><hr />\n");
-  // --- End log ---
 
     // +++ Feedback vom Formular anzeigen +++
     if (request->hasParam("status")) {
@@ -3279,30 +3123,26 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
       }
   };
   generateSentRow(last_send);
-  yield(); // <--- NEW YIELD
+  yield();
   generateSentRow(last_send_2);
-  yield(); // <--- NEW YIELD
+  yield(); 
   generateSentRow(last_send_3);
-  yield(); // <--- NEW YIELD
+  yield();
   generateSentRow(last_send_4);
-  yield(); // <--- NEW YIELD
+  yield();
   generateSentRow(last_send_5);
-  yield(); // <--- NEW YIELD
+  yield(); 
 
-      // --- Add Log after lambda calls ---
-      Serial.println("    Finished generating Sent Codes rows.");
+  // --- Add Log after lambda calls ---
+  Serial.println("    Finished generating Sent Codes rows.");
 
-// NEU: Platzhalterzeile mit ID versehen
-if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
-response->print("              <tr id='no-sent-codes'><td colspan='7' class='text-center'><em>No codes sent</em></td></tr>");
-response->print("            </tbody></table>\n");
+  // Platzhalterzeile mit ID versehen
+  if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
+  response->print("              <tr id='no-sent-codes'><td colspan='7' class='text-center'><em>No codes sent</em></td></tr>");
+  response->print("            </tbody></table>\n");
   response->print("          </div></div>\n");
 
-        // --- Add Log before the next existing yield ---
-        Serial.println("    Attempting yield AFTER Sent Codes table...");
-        yield(); // Keep the existing yield after the Sent table
-        Serial.println("    Yield AFTER Sent Codes table successful.");
-  
+  yield(); // Keep the existing yield after the Sent table
 
   // --- Codes Received Table ---
   response->print("      <div class='row'>\n");
@@ -3319,26 +3159,23 @@ response->print("            </tbody></table>\n");
       }
   };
   generateReceivedRow(last_recv, 1);
-  yield(); // <--- NEW YIELD
+  yield();
   generateReceivedRow(last_recv_2, 2);
-  yield(); // <--- NEW YIELD
+  yield();
   generateReceivedRow(last_recv_3, 3);
-  yield(); // <--- NEW YIELD
+  yield();
   generateReceivedRow(last_recv_4, 4);
-  yield(); // <--- NEW YIELD
+  yield();
   generateReceivedRow(last_recv_5, 5);
-  yield(); // <--- NEW YIELD
+  yield();
 
-  // NEU: Platzhalterzeile mit ID versehen
+  // Platzhalterzeile mit ID versehen
   if (!last_recv.valid && !last_recv_2.valid && !last_recv_3.valid && !last_recv_4.valid && !last_recv_5.valid)
   response->print("              <tr id='no-received-codes'><td colspan='5' class='text-center'><em>No codes received</em></td></tr>");
   response->print("            </tbody></table>\n");
   response->print("          </div></div><hr />\n");
   
-  // --- Add Log before the next existing yield ---
-  Serial.println("    Attempting yield AFTER Received Codes table...");
-  yield(); // Keep the existing yield after the Received table
-  Serial.println("    Yield AFTER Received Codes table successful.");
+  yield(); // yield after the Received table
 
   // +++ FORMULAR ZUM SENDEN +++
   response->print("      <div class='row'>\n");
@@ -3362,7 +3199,7 @@ response->print("            </tbody></table>\n");
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='type' class='col-sm-2 control-label'>Type</label>\n");
   response->print("              <div class='col-sm-10'>\n");
-  // --- KORREKTUR: Globale Funktion aufrufen ---
+  // --- Globale Funktion aufrufen ---
   // Übergibt "type" als Namen des Select-Elements und lastEncoding als vorselektierten Wert
   response->print(generateTypeDropdownHtml("type", lastEncoding));
   response->print("              </div>\n");
@@ -3396,7 +3233,7 @@ response->print("            </tbody></table>\n");
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='out' class='col-sm-2 control-label'>Output Pin</label>\n");
   response->print("              <div class='col-sm-10'>\n");
-  // --- KORREKTUR: Globale Funktion aufrufen ---
+  // --- Globale Funktion aufrufen ---
   // Übergibt "out" als Namen und lastOut (als int konvertiert) als vorselektierten Wert
   response->print(generateOutDropdownHtml("out", lastOut.toInt()));
   response->print("              </div>\n");
@@ -3414,10 +3251,7 @@ response->print("            </tbody></table>\n");
   response->print("      </div><hr />\n");
   // +++ ENDE FORMULAR +++
 
-        // --- Add Log before the next existing yield ---
-        Serial.println("    Attempting yield AFTER end formular table...");
-        yield(); // Keep the existing yield after the Received table
-        Serial.println("    Yield AFTER end formular table successful.");
+  yield(); // Keep the existing yield after the Received table
   
   // --- Pin Information ---
   response->print("      <div class='row'>\n");
@@ -3431,151 +3265,17 @@ response->print("            </tbody></table>\n");
   response->print("        </div>\n");
   response->print("      </div>\n");
 
-  // +++ JAVASCRIPT FÜR REMOTE BUTTONS +++
-  // response->print("      <script>\n");
-  // response->print("        document.getElementById('remote-buttons').addEventListener('click', function(event) {\n");
-  // response->print("          if (event.target.classList.contains('remote-button')) {\n");
-  // response->print("            event.preventDefault();\n");
-  // response->print("            const button = event.target;\n");
-  // response->print("            const isMacro = button.dataset.ismacro === 'true';\n"); // Prüfe data-ismacro
-  // response->print("            const buttonId = button.id;\n"); // Hole die Button-ID
+  yield();
 
-  // response->print("            console.log('Button clicked:', button.textContent, 'Is Macro:', isMacro);\n");
+  // --- Schreibe Footer in den Stream ---
+  sendFooter(response); // Übergibt den Stream
 
-  // response->print("            // Visuelles Feedback\n");
-  // response->print("            button.classList.remove('btn-success', 'btn-danger');\n"); // Reset status
-  // response->print("            button.classList.add('btn-warning'); \n");
-  // response->print("            button.disabled = true;\n"); // Deaktivieren während des Sendens
+  // --- Sende den kompletten Stream ---
+  request->send(response);
 
-  // response->print("            if (isMacro) {\n");
-  // response->print("              // --- Makro Senden --- \n");
-  // response->print("              const macroJsonString = buttonMacroDataStore[buttonId];\n"); // Hole JSON aus dem Store
-  // response->print("              if (!macroJsonString) { \n");
-  // response->print("                 console.error('Macro JSON not found or invalid for button:', buttonId);\n");
-  // response->print("                 button.classList.remove('btn-warning');\n");
-  // response->print("                 button.classList.add('btn-danger');\n");
-  // response->print("                 button.disabled = false;\n");
-  // response->print("                 return; \n"); // Abbruch
-  // response->print("              }\n");
-  // response->print("              console.log('Sending Macro JSON:', macroJsonString);\n");
-
-  // response->print("              const formData = new URLSearchParams();\n");
-  // response->print("              formData.append('plain', macroJsonString);\n"); // Füge den rohen JSON-String hinzu
-
-  // response->print("              fetch('/json', {\n"); // POST an /json
-  // response->print("                method: 'POST',\n");
-  // response->print("                headers: {\n");
-  // response->print("                  'Content-Type': 'application/x-www-form-urlencoded',\n");
-  // response->print("                },\n");
-  // response->print("                body: formData\n");
-  // response->print("              })\n");
-  // response->print("              .then(response => {\n");
-  // response->print("                button.classList.remove('btn-warning');\n");
-  // response->print("                if (!response.ok) {\n");
-  // response->print("                  console.error('Error sending Macro command via POST. Status:', response.status);\n");
-  // response->print("                  button.classList.add('btn-danger');\n");
-  // response->print("                } else {\n");
-  // response->print("                  console.log('Macro command sent successfully.');\n");
-  // response->print("                  button.classList.add('btn-success');\n");
-  // response->print("                }\n");
-  // response->print("                return response.text();\n"); // Lese Antwort, auch bei Fehler
-  // response->print("              })\n");
-  // response->print("              .then(data => console.log('Server response to macro:', data))\n");
-  // response->print("              .catch(error => {\n");
-  // response->print("                console.error('Fetch error during macro send:', error);\n");
-  // response->print("                button.classList.remove('btn-warning');\n");
-  // response->print("                button.classList.add('btn-danger');\n");
-  // response->print("              })\n");
-  // response->print("              .finally(() => {\n"); // Wird immer ausgeführt
-  // response->print("                 setTimeout(() => { button.classList.remove('btn-success', 'btn-danger'); button.disabled = false; }, 750);\n"); // Reset nach kurzer Zeit
-  // response->print("              });\n");
-
-  //       // --- Add Log before the next existing yield ---
-  //       Serial.println("    Attempting yield AFTER before else...");
-  //       yield(); // Keep the existing yield after the Received table
-  //       Serial.println("    Yield AFTER Received before else successful.");
-
-  // response->print("            } else {\n");
-  // response->print("              // --- Single IR Senden (Bestehende Logik) --- \n");
-  // response->print("              const irData = {\n"); // Lese aus data-* Attributen
-  // response->print("                type: button.dataset.type,\n");
-  // response->print("                data: button.dataset.data,\n");
-  // response->print("                length: parseInt(button.dataset.length, 10),\n");
-  // response->print("                address: button.dataset.address,\n");
-  // response->print("                repeat: parseInt(button.dataset.repeat, 10),\n");
-  // response->print("                out: parseInt(button.dataset.out, 10)\n");
-  // response->print("              };\n");
-  // response->print("              console.log('Sending Single IR:', irData);\n");
-
-  //   // --- Add yield within the else block (1) ---
-  //   Serial.println("    Attempting yield WITHIN single IR JS block (1)...");
-  //   yield();
-  //   Serial.println("    Yield WITHIN single IR JS block (1) successful.");
-
-    
-  // response->print("              const urlParams = new URLSearchParams(irData).toString();\n");
-  // response->print("              fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n"); // GET an /sendbutton
-  // response->print("              .then(response => {\n");
-  // response->print("                button.classList.remove('btn-warning');\n");
-  // response->print("                if (!response.ok) {\n");
-  // response->print("                  console.error('Error sending Single IR command via GET. Status:', response.status);\n");
-  // response->print("                  button.classList.add('btn-danger');\n");
-  // response->print("                } else {\n");
-  // response->print("                  console.log('Single IR command sent successfully.');\n");
-  // response->print("                  button.classList.add('btn-success');\n");
-  // response->print("                }\n");
-  // response->print("                return response.text();\n");
-  // response->print("              })\n");
-
-  //   // --- Add another yield within the else block (2) ---
-  //   Serial.println("    Attempting yield WITHIN single IR JS block (2)...");
-  //   yield();
-  //   Serial.println("    Yield WITHIN single IR JS block (2) successful.");
-
-    
-  // response->print("              .then(data => console.log('Server response to single IR:', data))\n");
-  // response->print("              .catch(error => {\n");
-  // response->print("                console.error('Fetch error during single IR send:', error);\n");
-  // response->print("                button.classList.remove('btn-warning');\n");
-  // response->print("                button.classList.add('btn-danger');\n");
-  // response->print("              })\n");
-  // response->print("              .finally(() => {\n");
-  // response->print("                 setTimeout(() => { button.classList.remove('btn-success', 'btn-danger'); button.disabled = false; }, 750);\n");
-  // response->print("              });\n");
-  
-  // // --- Add another yield within the else block (2) ---
-  // Serial.println("    Attempting yield finaly......");
-  // yield();
-  // Serial.println("    Yield WITHIN finaly successful.");
-
-
-  // response->print("            }\n"); // Ende else (Single IR)
-
-  // response->print("          }\n"); // Ende if (event.target.classList.contains...)
-  // response->print("        });\n");
-  // response->print("      </script>\n");
-  // // +++ ENDE JAVASCRIPT +++
-
-// --- NEW: Final yield before sendFooter ---
-Serial.println("    Attempting FINAL yield before sendFooter...");
-yield();
-Serial.println("    FINAL yield before sendFooter successful.");
-// --- END NEW ---
-
-// --- Add Log before calling sendFooter ---
-Serial.println("    Attempting to call sendFooter...");
-// --- Schreibe Footer in den Stream ---
-sendFooter(response); // Übergibt den Stream
-Serial.println("    sendFooter returned.");
-
-// --- Add Log before final send ---
-Serial.println("    Attempting final request->send(response)...");
-// --- Sende den kompletten Stream ---
-request->send(response);
-
-// --- Stack Check at End ---
-UBaseType_t stackHighWaterMarkEnd = uxTaskGetStackHighWaterMark(NULL);
-Serial.printf("<-- Leaving sendHomePage (after send) (Stack HWM: %u bytes, Min Free: %u)\n", stackHighWaterMarkEnd, stackHighWaterMarkEnd); // HWM is minimum free stack
+  // --- Stack Check at End ---
+  UBaseType_t stackHighWaterMarkEnd = uxTaskGetStackHighWaterMark(NULL);
+  Serial.printf("<-- Leaving sendHomePage (after send) (Stack HWM: %u bytes, Min Free: %u)\n", stackHighWaterMarkEnd, stackHighWaterMarkEnd); // HWM is minimum free stack
 
 }
 
@@ -3597,20 +3297,15 @@ void sendCodePage(AsyncWebServerRequest *request, Code selCode, int httpcode){
 
   Serial.println("    Calling sendHeader...");
   sendHeader(response);
-  Serial.println("    sendHeader returned.");
 
    // --- Check if stream creation failed ---
    if (response == nullptr) {
     Serial.println("!!! ERROR: Failed to beginResponseStream in sendCodePage!");
     request->send(500, "text/plain", "Internal Server Error");
     return;
-}
-Serial.println("    sendCodePage: beginResponseStream OK.");
+  }
 
-Serial.println("    sendCodePage: Calling sendHeader...");
-sendHeader(response);
-Serial.println("    sendCodePage: sendHeader returned.");
-
+  sendHeader(response);
   // --- END CHECK ---
 
   // --- Code Details ---
@@ -3712,9 +3407,6 @@ Serial.println("    sendCodePage: sendHeader returned.");
      response->print("          </ul>\n"); // Korrigiertes Ende
     response->print("        </div></div>\n");
   }
-
-  // --- JavaScript (wird hier nicht benötigt) ---
-  // ... (auskommentiert lassen oder entfernen) ...
 
   // --- Schreibe Footer in den Stream ---
   sendFooter(response); // Übergibt den Stream
@@ -3875,8 +3567,6 @@ String bin2hex(const uint8_t* bin, const int length) {
 //+=============================================================================
 // Send IR codes to variety of sources
 //
-// OLD: void irblast(String type, String dataStr, unsigned int len, int rdelay, int pulse, int pdelay, int repeat, long address, IRsend irsend) {
-// NEW: Add the 'out_pin' parameter
 void irblast(String type, String dataStr, unsigned int len, int rdelay, int pulse, int pdelay, int repeat, long address, IRsend irsend, int out_pin) {
   Serial.println("Blasting off");
   type.toLowerCase();
@@ -3957,19 +3647,15 @@ void irblast(String type, String dataStr, unsigned int len, int rdelay, int puls
   last_send.timestamp = now();
   last_send.valid = true;
 
-  // +++ NEUE ZEILEN +++
   last_send.repeat = repeat;
   last_send.out = out_pin;
-  // +++ ENDE NEUE ZEILEN +++
 
   resetReceive();
-  // NEU: Event senden
+  // Event senden
   sendCodeUpdateEvent("codeSent", last_send);
-  Serial.println("  <== irblast: Leaving function."); // Debugging
+  Serial.println("  <== irblast: Leaving function.");
 }
 
-// OLD: void pronto(JsonArray &pronto, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend) {
-// NEW: Add 'out_pin' parameter
 void pronto(JsonArray &pronto, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend, int out_pin) {
   // ... (rest of the function remains the same until the end)
   Serial.println("Pronto transmit");
@@ -4005,20 +3691,16 @@ void pronto(JsonArray &pronto, int rdelay, int pulse, int pdelay, int repeat, IR
   last_send.timestamp = now();
   last_send.valid = true;
 
-  // +++ NEUE ZEILEN +++
   last_send.repeat = repeat;
   last_send.out = out_pin;
-  // +++ ENDE NEUE ZEILEN +++
 
   resetReceive();
 
-  // NEU: Event senden
+  // Event senden
   sendCodeUpdateEvent("codeSent", last_send);
 
 }
 
-// OLD: void rawblast(JsonArray &raw, int khz, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend,int duty) {
-// NEW: Add 'out_pin' parameter
 void rawblast(JsonArray &raw, int khz, int rdelay, int pulse, int pdelay, int repeat, IRsend irsend, int duty, int out_pin) {
   // ... (rest of the function remains the same until the end)
   Serial.println("Raw transmit");
@@ -4055,14 +3737,12 @@ void rawblast(JsonArray &raw, int khz, int rdelay, int pulse, int pdelay, int re
   last_send.timestamp = now();
   last_send.valid = true;
 
-  // +++ NEUE ZEILEN +++
   last_send.repeat = repeat;
   last_send.out = out_pin;
-  // +++ ENDE NEUE ZEILEN +++
 
   resetReceive();
 
-  // NEU: Event senden
+  // Event senden
   sendCodeUpdateEvent("codeSent", last_send);
 }
 
@@ -4131,7 +3811,7 @@ void loop() {
     last_recv.timestamp = now();                                  // Set the new update time
     last_recv.valid = true;
 
-    // NEU: Event senden
+    // Event senden
     sendCodeUpdateEvent("codeReceived", last_recv);
     
     Serial.println("");                                           // Blank line between entries
