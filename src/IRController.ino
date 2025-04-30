@@ -319,6 +319,12 @@ void saveButtonConfig() {
      }
   }
 
+    // --- NEU: JSON-Dokument vor dem Schreiben ausgeben ---
+    Serial.println("--- JSON Document before writing to file ---");
+    serializeJsonPretty(jsonDoc, Serial); // Gibt das formatierte JSON auf Serial aus
+    Serial.println("\n------------------------------------------");
+    // --- ENDE NEU ---
+
   File configFile = LittleFS.open("/buttons.json", "w");
   if (!configFile) {
     Serial.println("        ERROR: Failed to open buttons.json for writing!");
@@ -684,14 +690,14 @@ void flushStep(String step, File jsf, size_t wc) {
   // --- Zusätzlicher Check ---
 size_t currentSize = jsf.size();
 int currentError = jsf.getWriteError();
-Serial.printf("  Checkpoint 1: Size before flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
+// Serial.printf("  Checkpoint: Size before flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
 jsf.flush(); // Versuch, hier schon zu flushen
 delay(50); // <-- Kleine Verzögerung
 currentSize = jsf.size();
 currentError = jsf.getWriteError();
-Serial.printf("  Checkpoint 1: Size after flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
+// Serial.printf("  Checkpoint 1: Size after flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
 if (currentSize == 0 && wc > 0) { // written_chunk vom ersten print
-    Serial.println("  !!! ERROR DETECTED: Size reset to 0 after Checkpoint 1 flush!");
+    Serial.println("  !!! ERROR DETECTED: Size reset to 0 after Checkpoint flush!");
     // Hier könnte man ggf. abbrechen
 }
 
@@ -700,7 +706,7 @@ if (currentSize == 0 && wc > 0) { // written_chunk vom ersten print
 // Füge diese neue Funktion irgendwo vor setup() ein
 
 void generateAndWriteJavaScript() {
-  Serial.printf("  Heap before JS write: %u\n", ESP.getFreeHeap());
+  // Serial.printf("  Heap before JS write: %u\n", ESP.getFreeHeap());
   Serial.println("Generating and writing JavaScript to LittleFS (/js/scripts.js)...");
 
   // Stelle sicher, dass das /js Verzeichnis existiert
@@ -765,20 +771,47 @@ void generateAndWriteJavaScript() {
   // (Diese wird nur auf den Button-Config-Seiten benötigt, könnte also
   //  auch separat generiert/geladen werden, aber der Einfachheit halber hier)
   jsFile.print("function toggleButtonFields(isMacro) {\n");
-  jsFile.print("  const singleFields = document.getElementById('single-ir-fields');\n");
-  jsFile.print("  const macroField = document.getElementById('macro-json-field');\n");
+  jsFile.print("  const singleFieldsContainer = document.getElementById('single-ir-fields');\n"); // Umbenannt für Klarheit
+  jsFile.print("  const macroFieldContainer = document.getElementById('macro-json-field');\n");   // Umbenannt für Klarheit
+  jsFile.print("  // IDs aller Felder in den jeweiligen Containern\n");
+  jsFile.print("  const singleFieldIds = ['btn_type', 'btn_data', 'btn_length', 'btn_address', 'btn_repeat', 'btn_out'];\n");
+  jsFile.print("  const macroFieldIds = ['btn_macroJson'];\n");
+  jsFile.print("  // IDs der Felder, die 'required' sein sollen, wenn sichtbar\n");
   jsFile.print("  const requiredSingleIds = ['btn_type', 'btn_data', 'btn_length'];\n");
   jsFile.print("  const requiredMacroIds = ['btn_macroJson'];\n");
+  jsFile.print("\n");
   jsFile.print("  if (isMacro) {\n");
-  jsFile.print("    if (singleFields) singleFields.style.display = 'none';\n");
-  jsFile.print("    if (macroField) macroField.style.display = 'block';\n");
-  jsFile.print("    requiredSingleIds.forEach(id => { const el = document.getElementById(id); if (el) el.required = false; });\n");
-  jsFile.print("    requiredMacroIds.forEach(id => { const el = document.getElementById(id); if (el) el.required = true; });\n");
+  jsFile.print("    // Macro Modus: Single-Felder ausblenden/deaktivieren, Macro-Feld anzeigen/aktivieren\n");
+  jsFile.print("    if (singleFieldsContainer) singleFieldsContainer.style.display = 'none';\n");
+  jsFile.print("    if (macroFieldContainer) macroFieldContainer.style.display = 'block';\n");
+  jsFile.print("\n");
+  jsFile.print("    singleFieldIds.forEach(id => {\n");
+  jsFile.print("      const el = document.getElementById(id);\n");
+  jsFile.print("      if (el) { el.required = false; el.disabled = true; }\n"); // <-- WICHTIG: disabled = true
+  jsFile.print("    });\n");
+  jsFile.print("    macroFieldIds.forEach(id => {\n");
+  jsFile.print("      const el = document.getElementById(id);\n");
+  jsFile.print("      if (el) {\n");
+  jsFile.print("        el.disabled = false; \n"); // <-- WICHTIG: disabled = false
+  jsFile.print("        el.required = requiredMacroIds.includes(id);\n");
+  jsFile.print("      }\n");
+  jsFile.print("    });\n");
   jsFile.print("  } else {\n");
-  jsFile.print("    if (singleFields) singleFields.style.display = 'block';\n");
-  jsFile.print("    if (macroField) macroField.style.display = 'none';\n");
-  jsFile.print("    requiredSingleIds.forEach(id => { const el = document.getElementById(id); if (el) el.required = true; });\n");
-  jsFile.print("    requiredMacroIds.forEach(id => { const el = document.getElementById(id); if (el) el.required = false; });\n");
+  jsFile.print("    // Single IR Modus: Macro-Feld ausblenden/deaktivieren, Single-Felder anzeigen/aktivieren\n");
+  jsFile.print("    if (singleFieldsContainer) singleFieldsContainer.style.display = 'block';\n");
+  jsFile.print("    if (macroFieldContainer) macroFieldContainer.style.display = 'none';\n");
+  jsFile.print("\n");
+  jsFile.print("    macroFieldIds.forEach(id => {\n");
+  jsFile.print("      const el = document.getElementById(id);\n");
+  jsFile.print("      if (el) { el.required = false; el.disabled = true; }\n"); // <-- WICHTIG: disabled = true
+  jsFile.print("    });\n");
+  jsFile.print("    singleFieldIds.forEach(id => {\n");
+  jsFile.print("      const el = document.getElementById(id);\n");
+  jsFile.print("      if (el) {\n");
+  jsFile.print("        el.disabled = false; \n"); // <-- WICHTIG: disabled = false
+  jsFile.print("        el.required = requiredSingleIds.includes(id);\n");
+  jsFile.print("      }\n");
+  jsFile.print("    });\n");
   jsFile.print("  }\n");
   jsFile.print("}\n\n");
 
@@ -896,7 +929,7 @@ void generateAndWriteJavaScript() {
   jsFile.print("        console.log('Sending Test Macro JSON:', macroJsonString);\n");
   jsFile.print("        const formData = new URLSearchParams(); formData.append('plain', macroJsonString);\n");
   jsFile.print("        fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
-  jsFile.print("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); alert(response.ok ? 'Test Macro OK!' : 'Error sending test macro.'); if (!response.ok) console.error('Test Macro POST Error:', response.status); return response.text(); })\n");
+  jsFile.print("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Test Macro POST Error:', response.status); return response.text(); })\n");
   jsFile.print("        .then(data => console.log('Server response test macro:', data))\n");
   jsFile.print("        .catch(error => { console.error('Fetch error test macro:', error); setButtonState(testSendButton, 'error'); alert('Network Error (Test Macro).'); })\n");
   jsFile.print("        .finally(() => { testSendButton.textContent = originalTestButtonText; });\n");
@@ -1022,26 +1055,22 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("      <div class='row'>\n");
   response->print("        <div class='col-md-12'>\n");
   response->print("          <h2>" + pageTitle + "</h2>\n");
-  response->print("          <form class='form-horizontal' action='" + actionUrl + "' method='post'>\n");
+  response->print("          <form class='form-horizontal' action='" + actionUrl + "' method='post'>\n"); // <-- FORM BEGINNT
   response->print("            <input type='hidden' name='button_id' value='" + String(buttonId) + "'>\n");
 
-  // --- Formularfelder ---
+  // --- Name ---
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='" + prefix + "name' class='col-sm-2 control-label'>Name</label>\n");
-  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label' value='" + String(buttonData.name) + "' required></div>\n"); // Korrektes Input-Feld
+  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label' value='" + String(buttonData.name) + "' required></div>\n");
   response->print("            </div>\n");
 
-    // --- Button Type Selector ---
+  // --- Button Type Selector (Radios) ---
   response->print("            <div class='form-group'>\n");
   response->print("              <label class='col-sm-2 control-label'>Button Type</label>\n");
   response->print("              <div class='col-sm-10'>\n");
-
-  // Radio für Single Command (Value 0)
   response->print("                <label class='radio-inline'><input type='radio' name='btn_isMacro' value='0' ");
   if (!buttonData.isMacro) response->print("checked ");
   response->print("onclick='toggleButtonFields(false)'> Single IR Command</label>\n");
-
-  // Radio für Macro (Value 1)
   response->print("                <label class='radio-inline'><input type='radio' name='btn_isMacro' value='1' ");
   if (buttonData.isMacro) response->print("checked ");
   response->print("onclick='toggleButtonFields(true)'> Macro (JSON)</label>\n");
@@ -1049,8 +1078,9 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("            </div>\n");
 
   // --- Container für Single IR Felder ---
-  response->print("            <div id='single-ir-fields' style='display: " + String(!buttonData.isMacro ? "block" : "none") + ";'>\n");
+  response->print("            <div id='single-ir-fields' style='display: " + String(!buttonData.isMacro ? "block" : "none") + ";'>\n"); // <-- OPEN single-ir-fields
 
+  // Type Dropdown
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
   response->print("              <div class='col-sm-10'>" + generateTypeDropdownHtml(prefix + "type", String(buttonData.type)) + "</div>\n");
@@ -1059,13 +1089,13 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   // Data
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='" + prefix + "data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
-  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "data' name='" + prefix + "data' placeholder='e.g., FF02FD' value='" + String(buttonData.data) + "' required></div>\n");
+  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "data' name='" + prefix + "data' placeholder='e.g., FF02FD' value='" + String(buttonData.data) + "'></div>\n"); // required wird durch JS gesetzt
   response->print("            </div>\n");
 
   // Length
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='" + prefix + "length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
-  response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "length' name='" + prefix + "length' placeholder='e.g., 32' value='" + String(buttonData.length) + "' required min='1'></div>\n");
+  response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "length' name='" + prefix + "length' placeholder='e.g., 32' value='" + String(buttonData.length) + "' min='1'></div>\n"); // required wird durch JS gesetzt
   response->print("            </div>\n");
 
   // Address
@@ -1080,37 +1110,39 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='" + prefix + "repeat' name='" + prefix + "repeat' value='" + String(buttonData.repeat) + "' min='1'></div>\n");
   response->print("            </div>\n");
 
+  // Output Pin
   response->print("            <div class='form-group'>\n");
-  response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n"); 
+  response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
   response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
   response->print("            </div>\n");
 
-  // --- Submit/Cancel/Test Buttons --- 
+  response->print("            </div>\n"); // <-- KORREKTES ENDE von 'single-ir-fields'
+
+  // --- Container und Feld für Macro JSON ---
+  response->print("            <div id='macro-json-field' style='display: " + String(buttonData.isMacro ? "block" : "none") + ";'>\n"); // <-- OPEN macro-json-field
+  response->print("              <div class='form-group'>\n");
+  response->print("                <label for='" + prefix + "macroJson' class='col-sm-2 control-label'>Macro JSON</label>\n");
+  response->print("                <div class='col-sm-10'>\n");
+  response->print("                  <textarea class='form-control' id='" + prefix + "macroJson' name='" + prefix + "macroJson' rows='10' placeholder='[{\"type\":\"nec\",\"data\":\"FF02FD\",\"length\":32}, {\"type\":\"delay\",\"rdelay\":500}, {\"type\":\"sony\",\"data\":\"A90\",\"length\":12}]'>" + String(buttonData.macroJson) + "</textarea>\n"); // required wird durch JS gesetzt
+  response->print("                  <span class='help-block'>Enter a JSON array defining the sequence of actions (like the payload for the /json endpoint). Use double quotes for keys and string values.</span>\n");
+  response->print("                </div>\n");
+  response->print("              </div>\n");
+  response->print("            </div>\n"); // <-- KORREKTES ENDE von 'macro-json-field'
+
+  // --- Submit/Cancel/Test Buttons (JETZT NACH BEIDEN FELD-CONTAINERN) ---
   response->print("            <div class='form-group'>\n");
   response->print("              <div class='col-sm-offset-2 col-sm-10'>\n");
-  response->print("                <button type='submit' class='btn btn-success'>Save Button</button>\n");
-  // --- Test Send Button ---
+  response->print("                <button type='submit' class='btn btn-success'>Save Button</button>\n"); // <-- Der Button
   response->print("                <button type='button' id='test-send-button' class='btn btn-info' style='margin-left: 10px;'>Test Send</button>\n");
-
   response->print("                <a href='/buttons' class='btn btn-default' style='margin-left: 10px;'>Cancel</a>\n");
   response->print("              </div>\n");
   response->print("            </div>\n");
 
-  response->print("          </form>\n");
-  response->print("        </div>\n");
-  response->print("      </div>\n");
-
-  // --- Container und Feld für Macro JSON ---
-  response->print("            <div id='macro-json-field' style='display: " + String(buttonData.isMacro ? "block" : "none") + ";'>\n");
-  response->print("              <div class='form-group'>\n");
-  response->print("                <label for='" + prefix + "macroJson' class='col-sm-2 control-label'>Macro JSON</label>\n");
-  response->print("                <div class='col-sm-10'>\n");
-  response->print("                  <textarea class='form-control' id='" + prefix + "macroJson' name='" + prefix + "macroJson' rows='10' placeholder='[{\"type\":\"nec\",\"data\":\"FF02FD\",\"length\":32}, {\"type\":\"delay\",\"rdelay\":500}, {\"type\":\"sony\",\"data\":\"A90\",\"length\":12}]'>" + String(buttonData.macroJson) + "</textarea>\n");
-  response->print("                  <span class='help-block'>Enter a JSON array defining the sequence of actions (like the payload for the /json endpoint). Use double quotes for keys and string values.</span>\n");
-  response->print("                </div>\n");
-  response->print("              </div>\n");
-  response->print("            </div>\n"); // Ende macro-json-field
+  response->print("          </form>\n"); // <-- FORM ENDET HIER KORREKT
+  response->print("        </div>\n"); // Ende col-md-12
+  response->print("      </div>\n");   // Ende row
 }
+
 
 // --- Handler für Backup (Download) ---
 void handleBackup(AsyncWebServerRequest *request) {
@@ -1325,138 +1357,139 @@ void handleSaveButton(AsyncWebServerRequest *request) {
   int repeat = repeatStr.toInt();
   int out = outStr.toInt();
   
-  name.trim();
+  name.trim();  // Trimme den Namen
+
+  Serial.println("--- Parameter Values ---");
+  Serial.println("buttonIdStr: " + buttonIdStr);
+  Serial.println("name: " + name);
+  Serial.println("isMacroStr: " + isMacroStr);
+  Serial.println("macroJson (String): " + macroJson); // <-- WICHTIG: Inhalt der String-Variable
+  Serial.println("type (String): " + type);
+  Serial.println("data (String): " + data);
+  Serial.println("lengthStr: " + lengthStr);
+  Serial.println("address (String): " + address);
+  Serial.println("repeatStr: " + repeatStr);
+  Serial.println("outStr: " + outStr);
+  Serial.println("------------------------");
 
   // --- Validierung ---
-  if (name.length() == 0 || data.length() == 0 || length <= 0) {
-      Serial.println("    ERROR: Validation failed! (name, data, or length invalid). Redirecting.");
-      request->redirect("/buttons?status=error_invalid_data");
+  // 1. Name ist immer erforderlich
+  if (name.length() == 0) {
+    Serial.println("    ERROR: Validation failed! (Name is missing). Redirecting.");
+    request->redirect("/buttons?status=error_invalid_data"); // Oder spezifischerer Status?
+    return;
+}
+
+// 2. Spezifische Validierung basierend auf isMacro
+if (isMacro) {
+  // Validierung für Makro
+  if (macroJson.length() == 0) {
+      Serial.println("    ERROR: Validation failed! (Macro JSON missing). Redirecting.");
+      request->redirect("/buttons?status=error_invalid_macro_data"); // Neuer Status für Makro-Fehler
       return;
   }
+  // JSON Validierung (wie gehabt)
+  DynamicJsonDocument tempDoc(1024);
+  DeserializationError error = deserializeJson(tempDoc, macroJson);
+  if (error) {
+      Serial.print("    ERROR: Macro JSON validation failed: ");
+      Serial.println(error.c_str());
+      request->redirect("/buttons?status=error_invalid_json");
+      return;
+  }
+  if (!tempDoc.is<JsonArray>()) {
+      Serial.println("    ERROR: Macro JSON is not a valid JSON array.");
+      request->redirect("/buttons?status=error_json_not_array");
+      return;
+  }
+  Serial.println("    Macro JSON validation passed.");
+  // Single-IR Felder werden später ignoriert/geleert
+  type = ""; data = ""; length = 0; address = ""; repeat = 1; out = 1; // Setze hier schon Defaults/Leerwerte
 
-  if (isMacro) {
-    // Validierung für Makro
-    if (macroJson.length() == 0) {
-        Serial.println("    ERROR: Validation failed! (Macro JSON missing). Redirecting.");
-        request->redirect("/buttons?status=error_invalid_macro_data");
-        return;
-    }
-    // JSON Validierung
-    DynamicJsonDocument tempDoc(1024); // Größe anpassen, falls nötig
-    DeserializationError error = deserializeJson(tempDoc, macroJson);
-    if (error) {
-        Serial.print("    ERROR: Macro JSON validation failed: ");
-        Serial.println(error.c_str());
-        request->redirect("/buttons?status=error_invalid_json");
-        return;
-    }
-    // Prüfen, ob es ein Array ist (Makros sollten Arrays sein)
-    if (!tempDoc.is<JsonArray>()) {
-        Serial.println("    ERROR: Macro JSON is not a valid JSON array.");
-        request->redirect("/buttons?status=error_json_not_array");
-        return;
-    }
-    Serial.println("    Macro JSON validation passed.");
-    // Single-IR Felder werden ignoriert/geleert
-    type = ""; data = ""; length = 0; address = ""; repeat = 1; out = 1;
   } else {
-      // Validierung für Single IR
+      // Validierung für Single IR (jetzt hier)
       if (data.length() == 0 || length <= 0) {
           Serial.println("    ERROR: Validation failed! (data or length invalid for single IR). Redirecting.");
-          request->redirect("/buttons?status=error_invalid_data");
+          request->redirect("/buttons?status=error_invalid_data"); // Status passt hier
           return;
       }
-      // Defaults für Single IR
+      // Defaults für Single IR (wie gehabt)
       if (repeat <= 0) repeat = 1;
       if (out <= 0 || out > 4) out = 1;
-      // Makro-Feld wird ignoriert/geleert
-      macroJson = "";
+      // Makro-Feld wird später ignoriert/geleert
+      macroJson = ""; // Setze hier schon Leerwert
+      Serial.println("    Single IR validation passed.");
   }
-  Serial.println("    Validation passed.");
+  // --- ENDE VALIDIERUNG ---
 
-  // Defaults setzen, falls Konvertierung fehlschlug oder Wert 0 war
+  // Defaults setzen (redundant, da oben schon erledigt, aber schadet nicht)
   if (repeat <= 0) repeat = 1;
-  if (out <= 0 || out > 4) out = 1; // Prüfe auch auf <=0
+  if (out <= 0 || out > 4) out = 1;
 
-  // --- Entscheiden: Add oder Edit ---
-  if (buttonId == -1) { // Neuer Button
-    Serial.println("    -> Entering ADD logic.");
-    if (buttonConfigs.size() >= MAX_BUTTONS) {
-       Serial.println("      ERROR: Maximum number of buttons reached!");
-       request->redirect("/buttons?status=error_max_buttons");
-       return;
-    }
+ // --- Button-Daten vorbereiten ---
+ ButtonConfig tempButton;
+ tempButton.configured = true;
+ strncpy(tempButton.name, name.c_str(), sizeof(tempButton.name) - 1);
+ tempButton.name[sizeof(tempButton.name) - 1] = '\0';
+ tempButton.isMacro = isMacro;
 
-    Serial.println("    Adding new button: " + name);
-    ButtonConfig newButton;
-    newButton.isMacro = isMacro; // NEU
-    newButton.configured = true;
-    strncpy(newButton.name, name.c_str(), sizeof(newButton.name) - 1);
-    newButton.name[sizeof(newButton.name) - 1] = '\0';
+ Serial.println("--- Preparing tempButton ---");
+ Serial.println("isMacro: " + String(isMacro));
 
-    if (isMacro) {
-        strncpy(newButton.macroJson, macroJson.c_str(), sizeof(newButton.macroJson) - 1);
-        newButton.macroJson[sizeof(newButton.macroJson) - 1] = '\0';
-        // Leere Single-IR Felder (optional, aber sauber)
-        newButton.type[0] = '\0'; newButton.data[0] = '\0'; newButton.length = 0;
-        newButton.address[0] = '\0'; newButton.repeat = 1; newButton.out = 1;
-    } else {
-        strncpy(newButton.type, type.c_str(), sizeof(newButton.type) - 1);
-        newButton.type[sizeof(newButton.type) - 1] = '\0';
-        strncpy(newButton.data, data.c_str(), sizeof(newButton.data) - 1);
-        newButton.data[sizeof(newButton.data) - 1] = '\0';
-        newButton.length = length;
-        strncpy(newButton.address, address.c_str(), sizeof(newButton.address) - 1);
-        newButton.address[sizeof(newButton.address) - 1] = '\0';
-        newButton.repeat = repeat;
-        newButton.out = out;
-        // Leere Makro-Feld
-        newButton.macroJson[0] = '\0';
-    }
-    buttonConfigs.push_back(newButton);
-    Serial.printf("    Vector size after add: %d\n", buttonConfigs.size());
+ if (isMacro) {
+     Serial.println("  -> In isMacro=true block.");
+     Serial.println("    Source macroJson (String): " + macroJson); // <-- Nochmal prüfen
+     strncpy(tempButton.macroJson, macroJson.c_str(), sizeof(tempButton.macroJson) - 1);
+     tempButton.macroJson[sizeof(tempButton.macroJson) - 1] = '\0';
+     Serial.println("    Destination tempButton.macroJson (char*): " + String(tempButton.macroJson)); // <-- WICHTIG: Inhalt nach strncpy
+     tempButton.type[0] = '\0';
+     tempButton.data[0] = '\0';
+     tempButton.length = 0;
+     tempButton.address[0] = '\0';
+     tempButton.repeat = 1;
+     tempButton.out = 1;
+ } else {
+     Serial.println("  -> In isMacro=false block.");
+     Serial.println("    Source type (String): " + type); // <-- Prüfen
+     strncpy(tempButton.type, type.c_str(), sizeof(tempButton.type) - 1);
+     tempButton.type[sizeof(tempButton.type) - 1] = '\0';
+     Serial.println("    Destination tempButton.type (char*): " + String(tempButton.type)); // <-- Prüfen
+     // ... (Rest kopieren) ...
+     tempButton.macroJson[0] = '\0';
+     Serial.println("    Cleared tempButton.macroJson.");
+ }
+ Serial.println("--- Finished preparing tempButton ---");
 
-  } else if (buttonId >= 0 && buttonId < buttonConfigs.size()) { // Button bearbeiten
-    Serial.println("    -> Entering EDIT logic for ID: " + String(buttonId));
-    ButtonConfig& existingButton = buttonConfigs[buttonId];
+ // --- Entscheiden: Add oder Edit ---
+ if (buttonId == -1) {
+   // ... (Add logic) ...
+   buttonConfigs.push_back(tempButton);
+   Serial.println("    Pushed tempButton to vector.");
+ } else if (buttonId >= 0 && buttonId < buttonConfigs.size()) {
+   // ... (Edit logic) ...
+   buttonConfigs[buttonId] = tempButton;
+   Serial.println("    Assigned tempButton to vector index " + String(buttonId));
+ } else {
+   // ... (Error logic) ...
+ }
 
-    existingButton.isMacro = isMacro; // NEU
-    existingButton.configured = true;
-    strncpy(existingButton.name, name.c_str(), sizeof(existingButton.name) - 1);
-    existingButton.name[sizeof(existingButton.name) - 1] = '\0';
+ // --- DEBUG VOR DEM SPEICHERN ---
+ Serial.println("--- Inspecting buttonConfigs before save ---");
+ for(size_t i = 0; i < buttonConfigs.size(); ++i) {
+     Serial.printf("  Button %d: Name='%s', isMacro=%d\n", i, buttonConfigs[i].name, buttonConfigs[i].isMacro);
+     if (buttonConfigs[i].isMacro) {
+         Serial.printf("    MacroJSON (char*): '%s'\n", buttonConfigs[i].macroJson); // <-- WICHTIG: Inhalt im Vector
+     } else {
+         Serial.printf("    Type: '%s', Data: '%s', Len: %d\n", buttonConfigs[i].type, buttonConfigs[i].data, buttonConfigs[i].length);
+     }
+ }
+ Serial.println("------------------------------------------");
+ // --- ENDE DEBUG ---
 
-    if (isMacro) {
-        strncpy(existingButton.macroJson, macroJson.c_str(), sizeof(existingButton.macroJson) - 1);
-        existingButton.macroJson[sizeof(existingButton.macroJson) - 1] = '\0';
-        // Leere Single-IR Felder
-        existingButton.type[0] = '\0'; existingButton.data[0] = '\0'; existingButton.length = 0;
-        existingButton.address[0] = '\0'; existingButton.repeat = 1; existingButton.out = 1;
-    } else {
-        strncpy(existingButton.type, type.c_str(), sizeof(existingButton.type) - 1);
-        existingButton.type[sizeof(existingButton.type) - 1] = '\0';
-        strncpy(existingButton.data, data.c_str(), sizeof(existingButton.data) - 1);
-        existingButton.data[sizeof(existingButton.data) - 1] = '\0';
-        existingButton.length = length;
-        strncpy(existingButton.address, address.c_str(), sizeof(existingButton.address) - 1);
-        existingButton.address[sizeof(existingButton.address) - 1] = '\0';
-        existingButton.repeat = repeat;
-        existingButton.out = out;
-        // Leere Makro-Feld
-        existingButton.macroJson[0] = '\0';
-    }
-    Serial.println("    Button data updated in vector.");
-
-  } else { // Ungültige ID
-    Serial.println("    ERROR: Invalid button_id received: " + String(buttonId));
-    request->redirect("/buttons?status=error_invalid_id");
-    return;
-  }
-
-  // --- Speichern und Redirect ---
-  Serial.println("    -> Calling saveButtonConfig()...");
-  saveButtonConfig();
-  Serial.println("    -> Redirecting to /buttons?status=saved");
-  request->redirect("/buttons?status=saved");
+ Serial.println("    -> Calling saveButtonConfig()...");
+ saveButtonConfig();
+ Serial.println("    -> Redirecting to /buttons?status=saved");
+ request->redirect("/buttons?status=saved");
 }
 
 //+=============================================================================
@@ -1969,7 +2002,6 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   if (LittleFS.exists(filename)) {
     // Datei existiert, sende sie mit korrektem Content-Type
     request->send(LittleFS, filename, "application/javascript");
-    Serial.println("Sent JS file: " + filename);
   } else {
     // Datei nicht gefunden (sollte nach setup() nicht passieren, aber sicher ist sicher)
     Serial.println("JS file not found: " + filename);
@@ -1985,153 +2017,156 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
     int simple = 0;
     if (request->hasParam("simple")) simple = request->getParam("simple")->value().toInt();
     String signature = request->hasParam("auth") ? request->getParam("auth")->value() : "";
-    String epid = request->hasParam("epid") ? request->getParam("epid")->value() : "";
-    String mid = request->hasParam("mid") ? request->getParam("mid")->value() : "";
-    String timestamp = request->hasParam("time") ? request->getParam("time")->value() : "";
-    int out = (request->hasParam("out")) ? request->getParam("out")->value().toInt() : 1; // Default output pin
+    int out = (request->hasParam("out")) ? request->getParam("out")->value().toInt() : 1;
 
-    // --- JSON Payload aus 'plain' Parameter holen ---
-    if (!request->hasParam("plain")) {
-        Serial.println("JSON parsing failed: Missing 'plain' parameter.");
-        if (simple) {
-            // sendCorsHeaders(); // ENTFERNT
-            request->send(400, "text/plain", "JSON parsing failed: Missing 'plain' parameter.");
-        } else {
-            sendHomePage(request, "JSON parsing failed: Missing 'plain' parameter.", "Error", 3, 400); // Übergibt request
-        }
-        return; // Wichtig: Handler hier beenden
+    // --- JSON Payload aus 'plain' POST-Parameter holen ---
+    if (!request->hasParam("plain", true)) {
+        Serial.println("JSON parsing failed: Missing 'plain' POST parameter.");
+        request->send(400, "text/plain", "Bad Request: Missing 'plain' parameter in POST body.");
+        return;
     }
+    String plainJson = request->getParam("plain", true)->value();
 
-    DynamicJsonDocument root(1024); // Größe ggf. anpassen
-    DeserializationError error = deserializeJson(root, request->getParam("plain")->value());
+    DynamicJsonDocument root(1024);
+    DeserializationError error = deserializeJson(root, plainJson);
 
     if (error) {
       Serial.println("JSON parsing failed");
       Serial.println(error.c_str());
-      if (simple) {
-        // sendCorsHeaders(); // ENTFERNT
-        request->send(400, "text/plain", "JSON parsing failed, " + String(error.c_str()));
-      } else {
-        sendHomePage(request, "JSON parsing failed", "Error", 3, 400); // Übergibt request
-      }
+      request->send(400, "text/plain", "Bad Request: JSON parsing failed, " + String(error.c_str()));
       root.clear();
-      // return; // Kein return hier, da root.clear() schon passiert ist
-    } else { // JSON erfolgreich geparst
-      digitalWrite(ledpin, LOW);
-      ticker.attach(0.5, disableLed);
+      return;
+    }
 
-      // Handle device state limitations for the global JSON command request
-      if (request->hasParam("device")) {
-        String device = request->getParam("device")->value();
-        Serial.println("Device name detected " + device);
-        int state = (request->hasParam("state")) ? request->getParam("state")->value().toInt() : 0;
-        if (deviceState.containsKey(device)) {
-          Serial.println("Contains the key!");
-          Serial.println(state);
-          int currentState = deviceState[device];
-          Serial.println(currentState);
-          if (state == currentState) {
-            Serial.println("Not sending command to " + device + ", already in state " + state);
-            if (simple) {
-              // sendCorsHeaders(); // ENTFERNT
-              request->send(200, "text/html", "Not sending command to " + device + ", already in state " + String(state)); // String() hinzugefügt
-            } else {
-              sendHomePage(request, "Not sending command to " + device + ", already in state " + String(state), "Warning", 2); // Übergibt request, String() hinzugefügt
-            }
-            // return; // Wichtig: Handler hier beenden, wenn Befehl nicht gesendet wird
-            // Korrektur: Wenn nur *dieser* Teil des JSON übersprungen werden soll, darf hier kein return stehen,
-            // aber wenn die *gesamte* Anfrage wegen des globalen device state ignoriert wird, dann return.
-            // Aktuelle Logik: Die gesamte Anfrage wird ignoriert. Also return ist korrekt.
-             root.clear(); // JSON leeren, bevor der Handler verlassen wird
-             return;
-          } else {
-            Serial.println("Setting device " + device + " to state " + state);
-            deviceState[device] = state;
-          }
+    Serial.println("JSON parsed successfully.");
+    digitalWrite(ledpin, LOW);
+    ticker.attach(0.5, disableLed);
+
+    // --- Device State Logik ---
+    // --- HIER WIEDER EINGEFÜGT ---
+    if (request->hasParam("device")) {
+      String device = request->getParam("device")->value(); // Variable 'device' deklarieren und zuweisen
+      int state = 0; // Default state
+      if (request->hasParam("state")) { // Prüfen, ob 'state' Parameter existiert
+          state = request->getParam("state")->value().toInt(); // Variable 'state' deklarieren und zuweisen
+      }
+      Serial.println("Device name detected " + device + ", requested state " + String(state)); // Loggen
+
+      // Jetzt prüfen, ob der Zustand bereits erreicht ist
+      if (deviceState.containsKey(device)) {
+        Serial.println("Contains the key!");
+        int currentState = deviceState[device];
+        Serial.println("Current stored state: " + String(currentState));
+        // --- KORRIGIERTE BEDINGUNG ---
+        if (state == currentState) { // Die tatsächliche Bedingung
+          Serial.println("Not sending command to " + device + ", already in state " + state);
+          request->send(200, "text/plain", "OK: Command held, device already in state " + String(state));
+          root.clear();
+          return; // Wichtig: Handler hier beenden
         } else {
-          Serial.println("Setting device " + device + " to state " + state);
-          deviceState[device] = state;
+           Serial.println("Updating device " + device + " to state " + state);
+           deviceState[device] = state; // Zustand aktualisieren, wenn er sich ändert
         }
+      } else {
+        Serial.println("Setting initial device " + device + " to state " + state);
+        deviceState[device] = state; // Initialen Zustand setzen
       }
+    }
+    // --- ENDE WIEDER EINGEFÜGT ---
 
-      // Simple Success-Antwort *vor* dem Senden senden, wenn simple=1
-      if (simple) {
-        // sendCorsHeaders(); // ENTFERNT
-        request->send(200, "text/html", "Success, processing codes..."); // Angepasste Nachricht
-      }
 
-      String message = "Code sent"; // Default message
+    // --- IR-Befehle verarbeiten ---
+    String message = "OK: Code(s) sent.";
+    for (size_t x = 0; x < root.size(); x++) {
+        JsonObject item = root[x].as<JsonObject>(); // Das aktuelle Objekt im Array
 
-      // --- IR-Befehle verarbeiten ---
-      for (size_t x = 0; x < root.size(); x++) {
-        String type = root[x]["type"].as<String>(); // .as<String>() ist sicherer
-        String ip = root[x]["ip"].as<String>();
-        int rdelay = root[x]["rdelay"] | 1000; // Default-Werte mit | Operator
-        int pulse = root[x]["pulse"] | 1;
-        int pdelay = root[x]["pdelay"] | 100;
-        int repeat = root[x]["repeat"] | 1;
-        int xout = root[x]["out"] | out; // Default auf globalen 'out' Parameter oder 1
-        int duty = root[x]["duty"] | 50;
+        // --- HIER WIEDER EINGEFÜGT: Device State Prüfung PRO BEFEHL ---
+        if (item.containsKey("device")) {
+            String itemDevice = item["device"].as<String>();
+            int itemState = item["state"] | 0; // Default 0, falls "state" fehlt
 
-        // Handle device state limitations on a per JSON object basis
-        String device = root[x]["device"].as<String>();
-        if (device != "null" && device.length() > 0) { // Prüfe auch auf leeren String
-          int state = root[x]["state"] | 0; // Default state 0
-          if (deviceState.containsKey(device)) {
-            int currentState = deviceState[device];
-            if (state == currentState) {
-              Serial.println("Not sending command component for " + device + ", already in state " + state);
-              message = "Code sent. Some components were held because device was already in appropriate state";
-              continue; // Nächsten Befehl im JSON Array verarbeiten
+            if (deviceState.containsKey(itemDevice)) {
+                int currentItemState = deviceState[itemDevice];
+                // --- KORRIGIERTE BEDINGUNG ---
+                if (itemState == currentItemState) { // Die tatsächliche Bedingung
+                    Serial.printf("  Skipping command %d for device %s, already in state %d\n", x, itemDevice.c_str(), itemState);
+                    message = "OK: Code(s) sent, but some components held.";
+                    continue; // Zum nächsten Befehl im Array springen
+                } else {
+                     deviceState[itemDevice] = itemState; // Zustand für dieses Gerät aktualisieren
+                }
             } else {
-              Serial.println("Setting device " + device + " to state " + state);
-              deviceState[device] = state;
+                 deviceState[itemDevice] = itemState; // Initialen Zustand für dieses Gerät setzen
             }
-          } else {
-            Serial.println("Setting device " + device + " to state " + state);
-            deviceState[device] = state;
-          }
         }
+        // --- ENDE WIEDER EINGEFÜGT ---
 
-        // --- IR Sende-Logik ---
-        if (type == "delay") {
-          delay(rdelay);
-        } else if (type == "raw") {
-          JsonArray raw = root[x]["data"].as<JsonArray>();
-          if (!raw) { Serial.println("Error: 'data' is not an array for raw type."); continue; }
-          int khz = root[x]["khz"] | 38;
-          rawblast(raw, khz, rdelay, pulse, pdelay, repeat, pickIRsend(xout), duty, xout);
-        } else if (type == "pronto") {
-          JsonArray pdata = root[x]["data"].as<JsonArray>();
-           if (!pdata) { Serial.println("Error: 'data' is not an array for pronto type."); continue; }
-          pronto(pdata, rdelay, pulse, pdelay, repeat, pickIRsend(xout), xout);
-        } else if (type == "roku") {
-          String data = root[x]["data"].as<String>();
-          if (data.length() == 0 || ip.length() == 0) { Serial.println("Error: Missing 'data' or 'ip' for roku type."); continue; }
-          rokuCommand(ip, data, repeat, rdelay);
-        } else { // Standard IR Codes
-          String data = root[x]["data"].as<String>();
-          if (data.length() == 0 || type.length() == 0) { Serial.println("Error: Missing 'data' or 'type'."); continue; }
-          String addressString = root[x]["address"].as<String>();
-          long address = 0;
-          if (addressString.length() > 0) {
-              address = strtoul(addressString.c_str(), 0, 0); // Base 0 erkennt 0x automatisch
-          }
-          int len = root[x]["length"] | 0; // Default 0, wird in irblast geprüft
-          if (len == 0) { Serial.println("Error: Missing or invalid 'length'."); continue; }
-          irblast(type, data, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(xout), xout);
+        // --- IR Sende-Logik (delay, raw, pronto, standard) ---
+        if (item.containsKey("type")) {
+            String type = item["type"].as<String>();
+            type.toLowerCase();
+
+            if (type == "delay" || type == "wait") {
+                int rdelay = item["rdelay"] | 500; // Default 500ms
+                Serial.printf("  Delaying for %d ms...\n", rdelay);
+                delay(rdelay);
+                continue; // Zum nächsten Befehl springen
+            }
+
+            // Standard-Parameter für IR-Befehle
+            int rdelay = item["rdelay"] | 1000;
+            int pulse = item["pulse"] | 1;
+            int pdelay = item["pdelay"] | 100;
+            int repeat = item["repeat"] | 1;
+            int item_out = item["out"] | out; // Nimm 'out' vom Item oder globalen Default
+            if (item_out < 1 || item_out > 4) item_out = out; // Fallback auf globalen Default bei ungültigem Item-Out
+
+            if (type == "raw") {
+                if (item.containsKey("data") && item["data"].is<JsonArray>()) {
+                    JsonArray raw = item["data"].as<JsonArray>();
+                    int khz = item["khz"] | 38;
+                    int duty = item["duty"] | 50;
+                    rawblast(raw, khz, rdelay, pulse, pdelay, repeat, pickIRsend(item_out), duty, item_out);
+                } else { Serial.println("  ERROR: Raw type missing 'data' array."); message = "ERROR: Invalid raw command."; }
+            } else if (type == "pronto") {
+                 if (item.containsKey("data") && item["data"].is<JsonArray>()) {
+                    JsonArray data = item["data"].as<JsonArray>();
+                    pronto(data, rdelay, pulse, pdelay, repeat, pickIRsend(item_out), item_out);
+                 } else { Serial.println("  ERROR: Pronto type missing 'data' array."); message = "ERROR: Invalid pronto command."; }
+            } else if (type == "roku") {
+                 String ip = item["ip"] | "";
+                 String data = item["data"] | "";
+                 if (ip.length() > 0 && data.length() > 0) {
+                    rokuCommand(ip, data, repeat, rdelay);
+                 } else { Serial.println("  ERROR: Roku type missing 'ip' or 'data'."); message = "ERROR: Invalid roku command."; }
+            } else { // Standard IR command
+                String dataStr = item["data"] | "";
+                int len = item["length"] | 0;
+                long address = 0;
+                if (item.containsKey("address")) {
+                    String addressStr = item["address"].as<String>();
+                    if (addressStr.length() > 0) address = strtoul(addressStr.c_str(), 0, 0);
+                }
+
+                if (dataStr.length() > 0 && len > 0) {
+                    irblast(type, dataStr, len, rdelay, pulse, pdelay, repeat, address, pickIRsend(item_out), item_out);
+                } else { Serial.println("  ERROR: Standard IR type missing 'data' or 'length'."); message = "ERROR: Invalid standard IR command."; }
+            }
+        } else {
+            Serial.printf("  ERROR: Command %d missing 'type'.\n", x);
+            message = "ERROR: Command missing 'type'.";
         }
-      } // End for loop
+        // Kurze Pause nach jedem Befehl im Makro (optional)
+        delay(50);
+    } // End for loop
 
-      // --- Finale Antwort senden (nur wenn simple=0) ---
-      if (!simple) {
-        Serial.println("Sending home page after JSON processing");
-        sendHomePage(request, message, "Success", 1); // Übergibt request
-      }
+    Serial.println("Finished processing JSON commands.");
+    request->send(200, "text/plain", message);
 
-      root.clear(); // JSON Speicher freigeben
-    } // End else (JSON parsing successful)
+    root.clear();
+
   }); // End request->on("/json")
+
 
 
   // Setup simple msg server to mirror version 1.0 functionality
