@@ -319,12 +319,6 @@ void saveButtonConfig() {
      }
   }
 
-    // --- NEU: JSON-Dokument vor dem Schreiben ausgeben ---
-    Serial.println("--- JSON Document before writing to file ---");
-    serializeJsonPretty(jsonDoc, Serial); // Gibt das formatierte JSON auf Serial aus
-    Serial.println("\n------------------------------------------");
-    // --- ENDE NEU ---
-
   File configFile = LittleFS.open("/buttons.json", "w");
   if (!configFile) {
     Serial.println("        ERROR: Failed to open buttons.json for writing!");
@@ -690,14 +684,14 @@ void flushStep(String step, File jsf, size_t wc) {
   // --- Zusätzlicher Check ---
 size_t currentSize = jsf.size();
 int currentError = jsf.getWriteError();
-// Serial.printf("  Checkpoint: Size before flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
+Serial.printf("  Checkpoint: Size before flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
 jsf.flush(); // Versuch, hier schon zu flushen
 delay(50); // <-- Kleine Verzögerung
 currentSize = jsf.size();
 currentError = jsf.getWriteError();
-// Serial.printf("  Checkpoint 1: Size after flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
+Serial.printf("  Checkpoint 1: Size after flush: %d, Error: %d, Heap: %u\n", currentSize, currentError, ESP.getFreeHeap());
 if (currentSize == 0 && wc > 0) { // written_chunk vom ersten print
-    Serial.println("  !!! ERROR DETECTED: Size reset to 0 after Checkpoint flush!");
+    Serial.println("  !!! ERROR DETECTED: Size reset to 0 after Checkpoint 1 flush!");
     // Hier könnte man ggf. abbrechen
 }
 
@@ -706,7 +700,7 @@ if (currentSize == 0 && wc > 0) { // written_chunk vom ersten print
 // Füge diese neue Funktion irgendwo vor setup() ein
 
 void generateAndWriteJavaScript() {
-  // Serial.printf("  Heap before JS write: %u\n", ESP.getFreeHeap());
+  Serial.printf("  Heap before JS write: %u\n", ESP.getFreeHeap());
   Serial.println("Generating and writing JavaScript to LittleFS (/js/scripts.js)...");
 
   // Stelle sicher, dass das /js Verzeichnis existiert
@@ -1427,67 +1421,68 @@ if (isMacro) {
   if (out <= 0 || out > 4) out = 1;
 
  // --- Button-Daten vorbereiten ---
- ButtonConfig tempButton;
+ ButtonConfig tempButton; // Temporäres Struct zum Befüllen
+
+ // Gemeinsame Felder
  tempButton.configured = true;
  strncpy(tempButton.name, name.c_str(), sizeof(tempButton.name) - 1);
  tempButton.name[sizeof(tempButton.name) - 1] = '\0';
  tempButton.isMacro = isMacro;
 
- Serial.println("--- Preparing tempButton ---");
- Serial.println("isMacro: " + String(isMacro));
-
+ // Modus-spezifische Felder
  if (isMacro) {
-     Serial.println("  -> In isMacro=true block.");
-     Serial.println("    Source macroJson (String): " + macroJson); // <-- Nochmal prüfen
+     // Makro-Daten kopieren
      strncpy(tempButton.macroJson, macroJson.c_str(), sizeof(tempButton.macroJson) - 1);
      tempButton.macroJson[sizeof(tempButton.macroJson) - 1] = '\0';
-     Serial.println("    Destination tempButton.macroJson (char*): " + String(tempButton.macroJson)); // <-- WICHTIG: Inhalt nach strncpy
+     // Single-IR Felder leeren
      tempButton.type[0] = '\0';
      tempButton.data[0] = '\0';
      tempButton.length = 0;
      tempButton.address[0] = '\0';
-     tempButton.repeat = 1;
-     tempButton.out = 1;
+     tempButton.repeat = 1; // Default
+     tempButton.out = 1;    // Default
+     Serial.println("    Prepared tempButton for MACRO."); // Debug
  } else {
-     Serial.println("  -> In isMacro=false block.");
-     Serial.println("    Source type (String): " + type); // <-- Prüfen
+     // Single-IR Daten kopieren
      strncpy(tempButton.type, type.c_str(), sizeof(tempButton.type) - 1);
      tempButton.type[sizeof(tempButton.type) - 1] = '\0';
-     Serial.println("    Destination tempButton.type (char*): " + String(tempButton.type)); // <-- Prüfen
-     // ... (Rest kopieren) ...
+     strncpy(tempButton.data, data.c_str(), sizeof(tempButton.data) - 1);
+     tempButton.data[sizeof(tempButton.data) - 1] = '\0';
+     tempButton.length = length;
+     strncpy(tempButton.address, address.c_str(), sizeof(tempButton.address) - 1);
+     tempButton.address[sizeof(tempButton.address) - 1] = '\0';
+     tempButton.repeat = repeat;
+     tempButton.out = out;
+     // Makro-Feld leeren
      tempButton.macroJson[0] = '\0';
-     Serial.println("    Cleared tempButton.macroJson.");
+     Serial.println("    Prepared tempButton for SINGLE IR."); // Debug
  }
- Serial.println("--- Finished preparing tempButton ---");
 
  // --- Entscheiden: Add oder Edit ---
- if (buttonId == -1) {
-   // ... (Add logic) ...
-   buttonConfigs.push_back(tempButton);
-   Serial.println("    Pushed tempButton to vector.");
- } else if (buttonId >= 0 && buttonId < buttonConfigs.size()) {
-   // ... (Edit logic) ...
-   buttonConfigs[buttonId] = tempButton;
-   Serial.println("    Assigned tempButton to vector index " + String(buttonId));
- } else {
-   // ... (Error logic) ...
+ if (buttonId == -1) { // Neuer Button
+   Serial.println("    -> Entering ADD logic.");
+   if (buttonConfigs.size() >= MAX_BUTTONS) {
+      Serial.println("      ERROR: Maximum number of buttons reached!");
+      request->redirect("/buttons?status=error_max_buttons");
+      return;
+   }
+   buttonConfigs.push_back(tempButton); // Füge das vorbereitete Objekt hinzu
+   Serial.printf("    Added new button '%s'. Vector size: %d\n", tempButton.name, buttonConfigs.size());
+
+ } else if (buttonId >= 0 && buttonId < buttonConfigs.size()) { // Button bearbeiten
+   Serial.println("    -> Entering EDIT logic for ID: " + String(buttonId));
+   buttonConfigs[buttonId] = tempButton; // Überschreibe das vorhandene Objekt
+   Serial.printf("    Edited button ID %d ('%s').\n", buttonId, tempButton.name);
+
+ } else { // Ungültige ID
+   Serial.println("    ERROR: Invalid button_id received: " + String(buttonId));
+   request->redirect("/buttons?status=error_invalid_id");
+   return;
  }
 
- // --- DEBUG VOR DEM SPEICHERN ---
- Serial.println("--- Inspecting buttonConfigs before save ---");
- for(size_t i = 0; i < buttonConfigs.size(); ++i) {
-     Serial.printf("  Button %d: Name='%s', isMacro=%d\n", i, buttonConfigs[i].name, buttonConfigs[i].isMacro);
-     if (buttonConfigs[i].isMacro) {
-         Serial.printf("    MacroJSON (char*): '%s'\n", buttonConfigs[i].macroJson); // <-- WICHTIG: Inhalt im Vector
-     } else {
-         Serial.printf("    Type: '%s', Data: '%s', Len: %d\n", buttonConfigs[i].type, buttonConfigs[i].data, buttonConfigs[i].length);
-     }
- }
- Serial.println("------------------------------------------");
- // --- ENDE DEBUG ---
-
+ // --- Speichern und Redirect ---
  Serial.println("    -> Calling saveButtonConfig()...");
- saveButtonConfig();
+ saveButtonConfig(); // Sollte jetzt die korrekten Daten aus dem Vector lesen
  Serial.println("    -> Redirecting to /buttons?status=saved");
  request->redirect("/buttons?status=saved");
 }
