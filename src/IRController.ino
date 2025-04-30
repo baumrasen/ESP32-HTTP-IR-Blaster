@@ -118,6 +118,9 @@ Code last_send_5;
 // Add near other global variables
 String buttonMacroJsStore = "const buttonMacroDataStore = {};";
 
+// Globale Variable für Datei-Upload ---
+File fsUploadFile;
+
 //+=============================================================================
 // Button Configuration
 //+=============================================================================
@@ -1145,6 +1148,91 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("            </div>\n"); // Ende macro-json-field
 }
 
+// --- NEU: Handler für Backup (Download) ---
+void handleBackup(AsyncWebServerRequest *request) {
+  Serial.println("Handling /backup request...");
+  if (LittleFS.exists("/buttons.json")) {
+    // Setze Header für Download
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/buttons.json", "application/json", true);
+    // Der letzte Parameter 'true' setzt Content-Disposition: attachment
+    response->addHeader("Content-Disposition", "attachment; filename=\"buttons.json\"");
+    request->send(response);
+    Serial.println("  Sent buttons.json for download.");
+  } else {
+    Serial.println("  ERROR: /buttons.json not found for backup.");
+    request->send(404, "text/plain", "ERROR: buttons.json not found.");
+  }
+}
+
+// --- NEU: Handler für Datei-Upload (wird während des Uploads aufgerufen) ---
+void handleRestoreUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+  if (!index) { // Erster Chunk der Datei
+    Serial.printf("Upload Start: %s\n", filename.c_str());
+    // Sicherheitscheck: Nur .json Dateien erlauben (optional aber empfohlen)
+    if (!filename.endsWith(".json")) {
+        Serial.println("  ERROR: Invalid file type uploaded (not .json). Aborting.");
+        // Hier könnten wir die Verbindung schließen oder eine Fehlermeldung vorbereiten
+        // Fürs Erste brechen wir nur das Schreiben ab.
+        if(fsUploadFile) fsUploadFile.close(); // Sicherstellen, dass nichts offen bleibt
+        // Man könnte hier auch einen Fehlerstatus für den finalen Handler setzen
+        return; // Verhindert das Öffnen/Schreiben
+    }
+
+    // Datei im LittleFS zum Schreiben öffnen (überschreibt vorhandene)
+    fsUploadFile = LittleFS.open("/buttons.json", "w");
+    if (!fsUploadFile) {
+        Serial.println("  ERROR: Could not open /buttons.json for writing!");
+        return; // Verhindert das Schreiben
+    }
+    Serial.println("  Opened /buttons.json for writing.");
+  }
+
+  if (fsUploadFile) { // Nur schreiben, wenn Datei erfolgreich geöffnet wurde
+      // Daten-Chunk in die Datei schreiben
+      if (len) {
+          size_t written = fsUploadFile.write(data, len);
+          if (written != len) {
+              Serial.printf("  ERROR: Writing to file failed! Expected %d, wrote %d\n", len, written);
+              // Hier könnte man den Upload abbrechen
+          }
+      }
+      // Serial.printf("  Written chunk: %d bytes\n", len); // Optional: Debugging
+  }
+
+
+  if (final) { // Letzter Chunk der Datei
+    if (fsUploadFile) {
+        fsUploadFile.close();
+        Serial.printf("Upload Finished: %s, Size: %u\n", filename.c_str(), index + len);
+        // WICHTIG: Konfiguration neu laden, NACHDEM die Datei geschlossen wurde!
+        Serial.println("  Reloading button configuration from restored file...");
+        loadButtonConfig(); // Lädt die gerade hochgeladene Konfiguration
+        updateButtonMacroJsStore(); // JS Store aktualisieren
+    } else {
+        Serial.println("  ERROR: Upload finished, but file was not open/valid.");
+    }
+  }
+}
+
+// --- NEU: Handler für die POST-Anfrage nach dem Upload ---
+void handleRestoreRequest(AsyncWebServerRequest *request) {
+    // Dieser Handler wird aufgerufen, NACHDEM handleRestoreUpload fertig ist.
+    // Wir senden hier nur eine Bestätigung und leiten zurück.
+    // Die eigentliche Arbeit (Datei speichern, Konfig laden) passiert in handleRestoreUpload.
+
+    // Sende eine einfache Bestätigungsseite mit Weiterleitung
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/html",
+        "<!DOCTYPE html><html><head><title>Restore Complete</title>"
+        "<meta http-equiv='refresh' content='3;url=/buttons'>" // Leitet nach 3s weiter
+        "</head><body>"
+        "<h2>Restore Successful!</h2>"
+        "<p>Button configuration has been updated from the uploaded file.</p>"
+        "<p>Reloading configuration and redirecting back to the button page in 3 seconds...</p>"
+        "<a href='/buttons'>Go back now</a>"
+        "</body></html>");
+    request->send(response);
+    Serial.println("Sent restore confirmation page.");
+}
 
 // Handler zum Anzeigen des "Add New Button"-Formulars
 void handleAddButtonPage(AsyncWebServerRequest *request) {
@@ -2319,6 +2407,19 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   }); // End request->on("/received")
 
 
+  // --- NEU: Routen für Backup und Restore hinzufügen ---
+  server->on("/backup", HTTP_GET, handleBackup);
+
+  // Handler für die Seite, die das Upload-Formular anzeigt (angenommen /buttons)
+  server->on("/buttons", HTTP_GET, sendButtonConfigPage); // Stelle sicher, dass diese Funktion die UI hinzufügt (siehe Schritt 4)
+
+  // Handler für den eigentlichen Upload-Vorgang
+  // Der erste Handler (handleRestoreRequest) wird nach Abschluss des Uploads aufgerufen.
+  // Der zweite Handler (handleRestoreUpload) wird während des Uploads für jeden Datenchunk aufgerufen.
+  server->on("/restore", HTTP_POST, handleRestoreRequest, handleRestoreUpload);
+  // --- ENDE NEU ---
+
+
     // --- NEUE/GEÄNDERTE BUTTON HANDLER ---
     server->on("/buttons", HTTP_GET, handleButtonConfigPage);      // Zeigt die Übersicht
     server->on("/addbutton", HTTP_GET, handleAddButtonPage);       // Zeigt leeres Formular
@@ -2484,6 +2585,120 @@ void fullCode (decode_results *results)
   if (results->overflow)
     Serial.println("WARNING: IR code too long. "
                    "Edit IRController.ino and increase captureBufSize");
+}
+
+void sendButtonConfigPage(AsyncWebServerRequest *request) {
+  Serial.println("Connection received endpoint '/buttons' (GET)");
+
+  // --- Startet den Response Stream ---
+  AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", 200);
+  sendHeader(response); // Sendet den HTML-Header
+
+  response->print("      <div class='row'>\n");
+  response->print("        <div class='col-md-12'>\n");
+  // response->print("          <h2>Configure Remote Buttons</h2>\n"); // Titel ist schon im Header? Ggf. anpassen
+
+  // --- Feedback-Meldungen anzeigen (z.B. nach Speichern/Löschen) ---
+  if (request->hasParam("status")) {
+      String status = request->getParam("status")->value();
+      if (status == "saved") {
+          response->print("<div class='alert alert-success'>Button saved successfully.</div>");
+      } else if (status == "deleted") {
+          response->print("<div class='alert alert-success'>Button deleted successfully.</div>");
+      } else if (status == "error_invalid_id") {
+          response->print("<div class='alert alert-danger'>Error: Invalid button ID specified.</div>");
+      } else if (status == "error_invalid_data") {
+          response->print("<div class='alert alert-danger'>Error: Invalid data submitted for button.</div>");
+      } else if (status == "error_save") {
+          response->print("<div class='alert alert-danger'>Error: Could not save button configuration.</div>");
+      } else if (status == "error_max_buttons") {
+          response->print("<div class='alert alert-warning'>Warning: Maximum number of buttons reached. Could not add new button.</div>");
+      } else if (status == "error_invalid_json") { // NEU
+          response->print("<div class='alert alert-danger'>Error: Invalid JSON format in Macro field.</div>");
+      } else if (status == "error_json_not_array") { // NEU
+          response->print("<div class='alert alert-danger'>Error: Macro JSON must be a valid JSON array.</div>");
+      }
+      // Füge hier ggf. weitere Statusmeldungen hinzu (z.B. für Restore)
+  }
+
+  // --- Backup/Restore Sektion (wie zuvor hinzugefügt) ---
+  response->print("          <hr><h2>Backup / Restore Configuration</h2>");
+  response->print("          <div style='margin-bottom: 15px;'>");
+  response->print("            <a href='/backup' class='btn btn-info' style='margin-right: 10px;'>Download Backup (buttons.json)</a>");
+  response->print("          </div>");
+  response->print("          <div>");
+  response->print("            <form method='POST' action='/restore' enctype='multipart/form-data'>");
+  response->print("              <label for='restoreFile'>Restore from Backup:</label><br>");
+  response->print("              <input type='file' id='restoreFile' name='restoreFile' accept='.json' required>");
+  response->print("              <button type='submit' class='btn btn-warning'>Upload and Restore</button>");
+  response->print("            </form>");
+  response->print("          </div><hr>");
+  // --- ENDE Backup/Restore Sektion ---
+
+  // --- ANZEIGE DER AKTUELLEN BUTTONS ---
+  response->print("          <h2>Current Buttons</h2>\n");
+  response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n");
+  response->print("            <thead><tr><th>Name</th><th>Mode</th><th>Type</th><th>Data/Macro</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Actions</th></tr></thead>\n");
+  response->print("            <tbody>\n");
+
+  if (!buttonConfigs.empty()) {
+    for (size_t i = 0; i < buttonConfigs.size(); ++i) {
+      const auto& button = buttonConfigs[i];
+      // if (!button.configured) continue; // Überspringe nicht konfigurierte (Optional)
+
+      response->print("              <tr>\n");
+      response->print("                <td>" + String(button.name) + "</td>\n"); // Name
+      response->print("                <td>" + String(button.isMacro ? "Macro" : "Single") + "</td>\n"); // Mode
+
+      // Spalten basierend auf dem Modus füllen
+      if (button.isMacro) {
+          response->print("                <td><code>-</code></td>\n"); // Type N/A
+          String macroSnippet = String(button.macroJson);
+          if (macroSnippet.length() > 30) macroSnippet = macroSnippet.substring(0, 27) + "...";
+          response->print("                <td><code style='font-size: 0.8em;'>" + macroSnippet + "</code></td>\n"); // Macro Snippet
+          response->print("                <td><code>-</code></td>\n"); // Length N/A
+          response->print("                <td><code>-</code></td>\n"); // Address N/A
+          response->print("                <td><code>-</code></td>\n"); // Repeat N/A
+          response->print("                <td><code>-</code></td>\n"); // Out N/A
+      } else {
+          response->print("                <td><code>" + String(button.type) + "</code></td>\n"); // Type
+          response->print("                <td><code>" + String(button.data) + "</code></td>\n"); // Data
+          response->print("                <td><code>" + String(button.length) + "</code></td>\n"); // Length
+          response->print("                <td><code>" + (String(button.address).length() > 0 ? String(button.address) : "-") + "</code></td>\n"); // Address
+          response->print("                <td><code>" + String(button.repeat) + "</code></td>\n"); // Repeat
+          String outText = String(button.out) + " (GPIO ";
+          switch(button.out) { /* ... GPIO Mapping ... */ }
+          outText += ")";
+          response->print("                <td><code>" + outText + "</code></td>\n"); // Out
+      }
+
+      // Actions Spalte (Edit/Delete Links)
+      response->print("                <td>\n");
+      response->print("                  <a href='/editbutton?id=" + String(i) + "' class='btn btn-xs btn-warning' style='margin-right: 3px;'>Edit</a>\n");
+      response->print("                  <a href='/deletebutton?id=" + String(i) + "' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure?\");'>Delete</a>\n");
+      response->print("                </td>\n");
+      response->print("              </tr>\n");
+      yield(); // Wichtig im Loop bei vielen Buttons
+    }
+  } else {
+    // Zeile für "Keine Buttons konfiguriert"
+    response->print("              <tr><td colspan='9' class='text-center'><em>No buttons configured.</em></td></tr>\n");
+  }
+
+  response->print("            </tbody>\n");
+  response->print("          </table>\n");
+  // --- ENDE ANZEIGE DER AKTUELLEN BUTTONS ---
+
+  // --- AKTIONEN ---
+  response->print("          <a href='/addbutton' class='btn btn-success'>Add New Button</a>\n"); // Link zum Hinzufügen
+  response->print("          <a href='/' class='btn btn-default' style='margin-left: 10px;'>Back to Home</a>\n"); // Zurück zur Hauptseite
+  // --- ENDE AKTIONEN ---
+
+  response->print("        </div>\n"); // Ende col-md-12
+  response->print("      </div>\n");   // Ende row
+
+  sendFooter(response); // Sendet den HTML-Footer
+  request->send(response); // Schließt den Stream und sendet die Antwort
 }
 
 //+=============================================================================
@@ -3023,14 +3238,9 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
     // Link zum Konfigurieren und Ende des Divs
     response->print("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
     response->print("          </div>\n"); // <-- Ende von <div id='remote-buttons'>
-    response->print("        </div>\n");
+    // response->print("        </div>\n");
     response->print("      </div><hr />\n");
   // --- End log ---
-
-  response->print("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
-    response->print("          </div>\n");
-    response->print("        </div>\n");
-    response->print("      </div><hr />\n");
 
     // +++ Feedback vom Formular anzeigen +++
     if (request->hasParam("status")) {
