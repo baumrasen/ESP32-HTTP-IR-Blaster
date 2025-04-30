@@ -2952,6 +2952,15 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 
   Serial.println("    Starting button generation loop...");
 
+    // --- NEW Debugging around vector access ---
+  // ... (Debug-Ausgaben) ...
+
+  // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN +++ // <--- Kommentar im Code
+  response->print("      <div class='row'>\n");
+  // HIER WIRD DAS DIV MIT DER ID ERZEUGT:
+  response->print("        <div class='col-md-12' id='remote-buttons'>\n"); // <--- HIER IST ES!
+  response->print("          <h3>Remote Buttons</h3>\n");
+
   // --- NEW Debugging around vector access ---
   Serial.printf("      Heap BEFORE vector check: %u\n", ESP.getFreeHeap());
   Serial.printf("      Checking buttonConfigs.size() = %d\n", buttonConfigs.size()); // Check size first
@@ -3010,6 +3019,12 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   Serial.println("    Attempting yield AFTER button loop...");
   yield(); // <--- This is the yield that seems to be crashing
   Serial.println("    Yield AFTER button loop successful.");
+
+    // Link zum Konfigurieren und Ende des Divs
+    response->print("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
+    response->print("          </div>\n"); // <-- Ende von <div id='remote-buttons'>
+    response->print("        </div>\n");
+    response->print("      </div><hr />\n");
   // --- End log ---
 
   response->print("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
