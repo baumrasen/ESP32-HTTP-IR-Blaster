@@ -714,301 +714,300 @@ if (currentSize == 0 && wc > 0) { // written_chunk vom ersten print
 }
 
 // Füge diese neue Funktion irgendwo vor setup() ein
-
+// Überarbeitete Funktion zum Generieren und Schreiben von JavaScript
 void generateAndWriteJavaScript() {
-  // Serial.printf("  Heap before JS write: %u\n", ESP.getFreeHeap());
-  Serial.println("Generating and writing JavaScript to LittleFS (/js/scripts.js)...");
+  Serial.println("Checking/Generating JavaScript (/js/scripts.js)...");
 
-  // Stelle sicher, dass das /js Verzeichnis existiert
-  if (!LittleFS.exists("/js")) {
-    if (LittleFS.mkdir("/js")) {
-      Serial.println("Created /js directory.");
-      delay(50); // Kleine Verzögerung
+  // 1. Generiere den NEUEN JavaScript-Inhalt in einen String im RAM
+  String newJsContent;
+  size_t estimatedSize = 8192; // Passe die Größe basierend auf der erwarteten JS-Größe an
+  if (!newJsContent.reserve(estimatedSize)) {
+      Serial.println("  !!! WARNING: Failed to reserve memory for newJsContent!");
+      // Optional: Abbruch oder weitermachen mit Risiko
+  } else {
+      Serial.printf("  Reserved %d bytes for newJsContent.\n", estimatedSize);
+  }
+
+  // --- Baue den newJsContent String auf ---
+  // Verwende newJsContent += F("...") oder newJsContent += String(...)
+  // Beispiel (ersetze alle jsFile.print durch +=):
+  newJsContent += F("/* --- Helper Functions --- */\n");
+  newJsContent += F("function setButtonState(button, state, resetDelay = 750) {\n");
+  newJsContent += F("  if (!button) return;\n");
+  newJsContent += F("  button.classList.remove('btn-warning', 'btn-success', 'btn-danger');\n");
+  newJsContent += F("  button.disabled = (state === 'sending');\n");
+  newJsContent += F("  if (state === 'sending') button.classList.add('btn-warning');\n");
+  newJsContent += F("  if (state === 'success') button.classList.add('btn-success');\n");
+  newJsContent += F("  if (state === 'error') button.classList.add('btn-danger');\n");
+  newJsContent += F("  if (state === 'success' || state === 'error') {\n");
+  newJsContent += F("    setTimeout(() => {\n");
+  newJsContent += F("      button.classList.remove('btn-success', 'btn-danger');\n");
+  newJsContent += F("      button.disabled = false;\n");
+  newJsContent += F("    }, resetDelay);\n");
+  newJsContent += F("  } else if (state === 'reset') {\n");
+  newJsContent += F("     button.disabled = false;\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("}\n\n");
+
+  newJsContent += F("function toggleButtonFields(isMacro) {\n");
+  newJsContent += F("  const singleFieldsContainer = document.getElementById('single-ir-fields');\n");
+  newJsContent += F("  const macroFieldContainer = document.getElementById('macro-json-field');\n");
+  newJsContent += F("  const singleFieldIds = ['btn_type', 'btn_data', 'btn_length', 'btn_address', 'btn_repeat', 'btn_out'];\n");
+  newJsContent += F("  const macroFieldIds = ['btn_macroJson'];\n");
+  newJsContent += F("  const requiredSingleIds = ['btn_type', 'btn_data', 'btn_length'];\n");
+  newJsContent += F("  const requiredMacroIds = ['btn_macroJson'];\n");
+  newJsContent += F("\n");
+  newJsContent += F("  if (isMacro) {\n");
+  newJsContent += F("    if (singleFieldsContainer) singleFieldsContainer.style.display = 'none';\n");
+  newJsContent += F("    if (macroFieldContainer) macroFieldContainer.style.display = 'block';\n");
+  newJsContent += F("\n");
+  newJsContent += F("    singleFieldIds.forEach(id => {\n");
+  newJsContent += F("      const el = document.getElementById(id);\n");
+  newJsContent += F("      if (el) { el.required = false; el.disabled = true; }\n");
+  newJsContent += F("    });\n");
+  newJsContent += F("    macroFieldIds.forEach(id => {\n");
+  newJsContent += F("      const el = document.getElementById(id);\n");
+  newJsContent += F("      if (el) {\n");
+  newJsContent += F("        el.disabled = false; \n");
+  newJsContent += F("        el.required = requiredMacroIds.includes(id);\n");
+  newJsContent += F("      }\n");
+  newJsContent += F("    });\n");
+  newJsContent += F("  } else {\n");
+  newJsContent += F("    if (singleFieldsContainer) singleFieldsContainer.style.display = 'block';\n");
+  newJsContent += F("    if (macroFieldContainer) macroFieldContainer.style.display = 'none';\n");
+  newJsContent += F("\n");
+  newJsContent += F("    macroFieldIds.forEach(id => {\n");
+  newJsContent += F("      const el = document.getElementById(id);\n");
+  newJsContent += F("      if (el) { el.required = false; el.disabled = true; }\n");
+  newJsContent += F("    });\n");
+  newJsContent += F("    singleFieldIds.forEach(id => {\n");
+  newJsContent += F("      const el = document.getElementById(id);\n");
+  newJsContent += F("      if (el) {\n");
+  newJsContent += F("        el.disabled = false; \n");
+  newJsContent += F("        el.required = requiredSingleIds.includes(id);\n");
+  newJsContent += F("      }\n");
+  newJsContent += F("    });\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("}\n\n");
+
+  newJsContent += F("/* --- SSE Logic --- */\n");
+  newJsContent += F("console.log('Setting up EventSource...');\n");
+  newJsContent += F("const evtSource = new EventSource('/events');\n");
+  newJsContent += F("const MAX_TABLE_ROWS = 5;\n");
+  newJsContent += F("function addTableRow(tableBodyId, codeData, isSentTable) {\n");
+  newJsContent += F("  const tableBody = document.getElementById(tableBodyId);\n");
+  newJsContent += F("  if (!tableBody) return;\n");
+  newJsContent += F("  const placeholderId = isSentTable ? 'no-sent-codes' : 'no-received-codes';\n");
+  newJsContent += F("  const placeholderRow = document.getElementById(placeholderId);\n");
+  newJsContent += F("  if (placeholderRow) placeholderRow.remove();\n");
+  newJsContent += F("  let newRowHtml = `<tr class='text-uppercase'>`;\n");
+  newJsContent += F("  newRowHtml += `<td>${codeData.timestamp}</td>`;\n");
+  newJsContent += F("  newRowHtml += `<td><code>${codeData.data}</code></td>`;\n");
+  newJsContent += F("  newRowHtml += `<td><code>${codeData.encoding}</code></td>`;\n");
+  newJsContent += F("  newRowHtml += `<td><code>${codeData.bits}</code></td>`;\n");
+  newJsContent += F("  newRowHtml += `<td><code>${codeData.address || '-'}</code></td>`;\n");
+  newJsContent += F("  if (isSentTable) {\n");
+  newJsContent += F("    newRowHtml += `<td><code>${codeData.repeat}</code></td>`;\n");
+  newJsContent += F("    newRowHtml += `<td><code>${codeData.out}</code></td>`;\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("  newRowHtml += `</tr>`;\n");
+  newJsContent += F("  tableBody.insertAdjacentHTML('afterbegin', newRowHtml);\n");
+  newJsContent += F("  while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
+  newJsContent += F("    tableBody.deleteRow(-1);\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("}\n");
+  newJsContent += F("evtSource.addEventListener('codeSent', function(event) {\n");
+  newJsContent += F("  console.log('SSE codeSent:', event.data);\n");
+  newJsContent += F("  try { const codeData = JSON.parse(event.data); addTableRow('sent-codes-body', codeData, true); } catch (e) { console.error('Error parsing codeSent data:', e); }\n");
+  newJsContent += F("});\n");
+  newJsContent += F("evtSource.addEventListener('codeReceived', function(event) {\n");
+  newJsContent += F("  console.log('SSE codeReceived:', event.data);\n");
+  newJsContent += F("  try { const codeData = JSON.parse(event.data); addTableRow('received-codes-body', codeData, false); } catch (e) { console.error('Error parsing codeReceived data:', e); }\n");
+  newJsContent += F("});\n");
+  newJsContent += F("evtSource.onerror = function(err) { console.error('EventSource failed:', err); };\n\n");
+
+  newJsContent += F("/* --- Initializations & Listeners --- */\n");
+  newJsContent += F("  /* Remote Button Handler */\n");
+  newJsContent += F("  console.log('Attempting to find #remote-buttons...');\n");
+  newJsContent += F("  const remoteButtonsContainer = document.getElementById('remote-buttons');\n");
+  newJsContent += F("  if (remoteButtonsContainer) {\n");
+  newJsContent += F("    console.log('#remote-buttons found. Attaching listener...');\n");
+  newJsContent += F("    remoteButtonsContainer.addEventListener('click', function(event) {\n");
+  newJsContent += F("      console.log('Click detected inside container.');\n");
+  newJsContent += F("      if (event.target.classList.contains('remote-button')) {\n");
+  newJsContent += F("        event.preventDefault();\n");
+  newJsContent += F("        const button = event.target;\n");
+  newJsContent += F("        const isMacro = button.dataset.ismacro === 'true';\n");
+  newJsContent += F("        const buttonId = button.id;\n");
+  newJsContent += F("        console.log('Button clicked:', button.textContent, 'Is Macro:', isMacro, 'ID:', buttonId);\n");
+  newJsContent += F("        if (typeof setButtonState !== 'function') { console.error('setButtonState missing!'); alert('Internal Error'); return; }\n");
+  newJsContent += F("        setButtonState(button, 'sending');\n");
+  newJsContent += F("        if (isMacro) {\n");
+  newJsContent += F("          if (typeof buttonMacroDataStore === 'undefined' || !buttonMacroDataStore.hasOwnProperty(buttonId)) { console.error('Macro data missing for', buttonId); setButtonState(button, 'error'); alert('Error: Macro data missing.'); return; }\n");
+  newJsContent += F("          const macroJsonString = buttonMacroDataStore[buttonId];\n");
+  newJsContent += F("          console.log('Sending Macro JSON:', macroJsonString);\n");
+  newJsContent += F("          const formData = new URLSearchParams(); formData.append('plain', macroJsonString);\n");
+  newJsContent += F("          fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
+  newJsContent += F("          .then(response => { setButtonState(button, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Macro POST Error:', response.status); else console.log('Macro OK'); return response.text(); })\n");
+  newJsContent += F("          .then(data => console.log('Server response macro:', data))\n");
+  newJsContent += F("          .catch(error => { console.error('Fetch error macro:', error); setButtonState(button, 'error'); alert('Network Error (Macro).'); });\n");
+  newJsContent += F("        } else {\n");
+  newJsContent += F("          const irData = { type: button.dataset.type, data: button.dataset.data, length: parseInt(button.dataset.length, 10), address: button.dataset.address, repeat: parseInt(button.dataset.repeat, 10), out: parseInt(button.dataset.out, 10) };\n");
+  newJsContent += F("          console.log('Sending Single IR:', irData);\n");
+  newJsContent += F("          if (!irData.type || !irData.data || !irData.length || irData.length <= 0) { console.error('Invalid data attributes:', buttonId, irData); setButtonState(button, 'error'); alert('Error: Invalid button data.'); return; }\n");
+  newJsContent += F("          const urlParams = new URLSearchParams(irData).toString();\n");
+  newJsContent += F("          fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
+  newJsContent += F("          .then(response => { setButtonState(button, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Single IR GET Error:', response.status); else console.log('Single IR OK'); return response.text(); })\n");
+  newJsContent += F("          .then(data => console.log('Server response single IR:', data))\n");
+  newJsContent += F("          .catch(error => { console.error('Fetch error single IR:', error); setButtonState(button, 'error'); alert('Network Error (Single IR).'); });\n");
+  newJsContent += F("        }\n");
+  newJsContent += F("      }\n");
+  newJsContent += F("    });\n");
+  newJsContent += F("  }\n\n");
+
+  newJsContent += F("  /* Test Send Button Handler */\n");
+  newJsContent += F("  const testSendButton = document.getElementById('test-send-button');\n");
+  newJsContent += F("  if (testSendButton) {\n");
+  newJsContent += F("    const originalTestButtonText = testSendButton.textContent;\n");
+  newJsContent += F("    testSendButton.addEventListener('click', function(event) {\n");
+  newJsContent += F("      console.log('Test Send button clicked.');\n");
+  newJsContent += F("      const prefix = 'btn_'; let irData = {}; let macroJsonString = ''; let isMacroTest = false;\n");
+  newJsContent += F("      try {\n");
+  newJsContent += F("        isMacroTest = document.querySelector('input[name=\"btn_isMacro\"]:checked').value === '1';\n");
+  newJsContent += F("        if (isMacroTest) {\n");
+  newJsContent += F("          macroJsonString = document.getElementById(prefix + 'macroJson').value;\n");
+  newJsContent += F("          JSON.parse(macroJsonString);\n");
+  newJsContent += F("        } else {\n");
+  newJsContent += F("          irData.type = document.getElementById(prefix + 'type').value; irData.data = document.getElementById(prefix + 'data').value; irData.length = parseInt(document.getElementById(prefix + 'length').value, 10); irData.address = document.getElementById(prefix + 'address').value; irData.repeat = parseInt(document.getElementById(prefix + 'repeat').value, 10); irData.out = parseInt(document.getElementById(prefix + 'out').value, 10);\n");
+  newJsContent += F("          if (!irData.type || !irData.data || !irData.length || irData.length <= 0) throw new Error('Missing Type, Data, or valid Length for Single IR.');\n");
+  newJsContent += F("          if (!irData.repeat || irData.repeat <= 0) irData.repeat = 1;\n");
+  newJsContent += F("          if (!irData.out || irData.out <= 0 || irData.out > 4) irData.out = 1;\n");
+  newJsContent += F("        }\n");
+  newJsContent += F("      } catch (e) { console.error('Error reading/validating form:', e); alert('Error: ' + e.message); return; }\n");
+  newJsContent += F("      testSendButton.textContent = 'Sending...'; setButtonState(testSendButton, 'sending');\n");
+  newJsContent += F("      if (isMacroTest) {\n");
+  newJsContent += F("        console.log('Sending Test Macro JSON:', macroJsonString);\n");
+  newJsContent += F("        const formData = new URLSearchParams(); formData.append('plain', macroJsonString);\n");
+  newJsContent += F("        fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
+  newJsContent += F("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Test Macro POST Error:', response.status); return response.text(); })\n");
+  newJsContent += F("        .then(data => console.log('Server response test macro:', data))\n");
+  newJsContent += F("        .catch(error => { console.error('Fetch error test macro:', error); setButtonState(testSendButton, 'error'); alert('Network Error (Test Macro).'); })\n");
+  newJsContent += F("        .finally(() => { testSendButton.textContent = originalTestButtonText; });\n");
+  newJsContent += F("      } else {\n");
+  newJsContent += F("        console.log('Sending Test Single IR:', irData);\n");
+  newJsContent += F("        const urlParams = new URLSearchParams(irData).toString();\n");
+  newJsContent += F("        fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
+  newJsContent += F("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Test Single IR GET Error:', response.status); return response.text(); })\n");
+  newJsContent += F("        .then(data => console.log('Server response test single IR:', data))\n");
+  newJsContent += F("        .catch(error => { console.error('Fetch error test single IR:', error); setButtonState(testSendButton, 'error'); alert('Network Error (Test Single IR).'); })\n");
+  newJsContent += F("        .finally(() => { testSendButton.textContent = originalTestButtonText; });\n");
+  newJsContent += F("      }\n");
+  newJsContent += F("    });\n");
+  newJsContent += F("  }\n\n");
+
+  newJsContent += F("  /* Initial Button Form Toggle */\n");
+  newJsContent += F("  const macroRadio = document.querySelector('input[name=\"btn_isMacro\"][value=\"1\"]');\n");
+  newJsContent += F("  if (macroRadio) {\n");
+  newJsContent += F("    if (macroRadio.checked) { toggleButtonFields(true); }\n");
+  newJsContent += F("    else { const singleRadio = document.querySelector('input[name=\"btn_isMacro\"][value=\"0\"]'); if (singleRadio && singleRadio.checked) { toggleButtonFields(false); } else { toggleButtonFields(false); } }\n");
+  newJsContent += F("  }\n\n");
+  // --- Ende Aufbau newJsContent ---
+
+  // 2. Lese den VORHANDENEN Inhalt (falls Datei existiert)
+  String existingJsContent = "";
+  bool fileExists = LittleFS.exists("/js/scripts.js");
+  bool readSuccess = false;
+
+  if (fileExists) {
+    Serial.println("  Existing /js/scripts.js found. Reading content...");
+    File existingJsFile = LittleFS.open("/js/scripts.js", "r");
+    if (existingJsFile && !existingJsFile.isDirectory()) {
+      // Lese den gesamten Inhalt. Vorsicht bei sehr großen Dateien!
+      existingJsContent = existingJsFile.readString();
+      existingJsFile.close();
+      // Prüfe, ob das Lesen erfolgreich war (readString gibt leeren String bei Fehler)
+      // Wir erlauben auch eine leere Datei (size 0), falls das gewollt ist.
+      if (existingJsContent.length() > 0 || existingJsFile.size() == 0) {
+         Serial.printf("  Read %d bytes from existing file.\n", existingJsContent.length());
+         readSuccess = true;
+      } else {
+         Serial.println("  ERROR: Failed to read content from existing file (readString failed?).");
+      }
     } else {
-      Serial.println("ERROR: Failed to create /js directory!");
-      // Fehlerbehandlung? Hier könnte man anhalten oder weitermachen und hoffen.
+      Serial.println("  ERROR: Failed to open existing file for reading!");
+      if (existingJsFile) existingJsFile.close(); // Schließen, falls es ein Verzeichnis war
     }
   } else {
-    Serial.println("/js directory already exists.");
+    Serial.println("  Existing /js/scripts.js not found.");
   }
 
-  File jsFile = LittleFS.open("/js/scripts.js", "w");
-
-  // --- Verbesserte Prüfung nach open ---
-  if (!jsFile || jsFile.isDirectory()) { // Prüfen, ob es eine gültige Datei zum Schreiben ist
-    Serial.println("ERROR: Failed to open /js/scripts.js for writing (invalid file handle or directory)!");
-    if (jsFile) jsFile.close(); // Schließen, falls es ein Verzeichnis war
-    return; // Funktion abbrechen
-  }
-  Serial.println("  File /js/scripts.js opened for writing."); // Bestätigung hinzufügen
-
-  size_t written_chunk = 0;
-
-  // size_t written_chunk = jsFile.print(F("/* --- Helper Functions --- */\n"));
-  // Serial.printf("  Bytes written by first print: %d\n", written_chunk);
-  // if (written_chunk == 0) {
-  //   Serial.println("  !!! WARNING: First jsFile.print() returned 0 bytes!");
-  // }
-
-  // --- Schreibe den JavaScript-Code in die Datei ---
-  // ... (alle jsFile.print() Aufrufe bleiben unverändert) ...
-
-  // --- Schreibe den JavaScript-Code in die Datei ---
-  // Wichtig: Verwende jsFile.print() oder jsFile.println()
-
-  // 1. Helper-Funktion: setButtonState
-  jsFile.print(F("/* --- Helper Functions --- */\n"));
-  jsFile.print("function setButtonState(button, state, resetDelay = 750) {\n");
-  jsFile.print("  if (!button) return;\n");
-  jsFile.print("  button.classList.remove('btn-warning', 'btn-success', 'btn-danger');\n");
-  jsFile.print("  button.disabled = (state === 'sending');\n");
-  jsFile.print("  if (state === 'sending') button.classList.add('btn-warning');\n");
-  jsFile.print("  if (state === 'success') button.classList.add('btn-success');\n");
-  jsFile.print("  if (state === 'error') button.classList.add('btn-danger');\n");
-  jsFile.print("  if (state === 'success' || state === 'error') {\n");
-  jsFile.print("    setTimeout(() => {\n");
-  jsFile.print("      button.classList.remove('btn-success', 'btn-danger');\n");
-  jsFile.print("      button.disabled = false;\n");
-  jsFile.print("    }, resetDelay);\n");
-  jsFile.print("  } else if (state === 'reset') {\n");
-  jsFile.print("     button.disabled = false;\n");
-  jsFile.print("  }\n");
-  jsFile.print("}\n\n");
-
-  flushStep("Step 1 ready", jsFile, written_chunk);
-
-  // 2. Helper-Funktion: toggleButtonFields + Initialisierung
-  // (Diese wird nur auf den Button-Config-Seiten benötigt, könnte also
-  //  auch separat generiert/geladen werden, aber der Einfachheit halber hier)
-  jsFile.print("function toggleButtonFields(isMacro) {\n");
-  jsFile.print("  const singleFieldsContainer = document.getElementById('single-ir-fields');\n"); // Umbenannt für Klarheit
-  jsFile.print("  const macroFieldContainer = document.getElementById('macro-json-field');\n");   // Umbenannt für Klarheit
-  jsFile.print("  // IDs aller Felder in den jeweiligen Containern\n");
-  jsFile.print("  const singleFieldIds = ['btn_type', 'btn_data', 'btn_length', 'btn_address', 'btn_repeat', 'btn_out'];\n");
-  jsFile.print("  const macroFieldIds = ['btn_macroJson'];\n");
-  jsFile.print("  // IDs der Felder, die 'required' sein sollen, wenn sichtbar\n");
-  jsFile.print("  const requiredSingleIds = ['btn_type', 'btn_data', 'btn_length'];\n");
-  jsFile.print("  const requiredMacroIds = ['btn_macroJson'];\n");
-  jsFile.print("\n");
-  jsFile.print("  if (isMacro) {\n");
-  jsFile.print("    // Macro Modus: Single-Felder ausblenden/deaktivieren, Macro-Feld anzeigen/aktivieren\n");
-  jsFile.print("    if (singleFieldsContainer) singleFieldsContainer.style.display = 'none';\n");
-  jsFile.print("    if (macroFieldContainer) macroFieldContainer.style.display = 'block';\n");
-  jsFile.print("\n");
-  jsFile.print("    singleFieldIds.forEach(id => {\n");
-  jsFile.print("      const el = document.getElementById(id);\n");
-  jsFile.print("      if (el) { el.required = false; el.disabled = true; }\n"); // <-- WICHTIG: disabled = true
-  jsFile.print("    });\n");
-  jsFile.print("    macroFieldIds.forEach(id => {\n");
-  jsFile.print("      const el = document.getElementById(id);\n");
-  jsFile.print("      if (el) {\n");
-  jsFile.print("        el.disabled = false; \n"); // <-- WICHTIG: disabled = false
-  jsFile.print("        el.required = requiredMacroIds.includes(id);\n");
-  jsFile.print("      }\n");
-  jsFile.print("    });\n");
-  jsFile.print("  } else {\n");
-  jsFile.print("    // Single IR Modus: Macro-Feld ausblenden/deaktivieren, Single-Felder anzeigen/aktivieren\n");
-  jsFile.print("    if (singleFieldsContainer) singleFieldsContainer.style.display = 'block';\n");
-  jsFile.print("    if (macroFieldContainer) macroFieldContainer.style.display = 'none';\n");
-  jsFile.print("\n");
-  jsFile.print("    macroFieldIds.forEach(id => {\n");
-  jsFile.print("      const el = document.getElementById(id);\n");
-  jsFile.print("      if (el) { el.required = false; el.disabled = true; }\n"); // <-- WICHTIG: disabled = true
-  jsFile.print("    });\n");
-  jsFile.print("    singleFieldIds.forEach(id => {\n");
-  jsFile.print("      const el = document.getElementById(id);\n");
-  jsFile.print("      if (el) {\n");
-  jsFile.print("        el.disabled = false; \n"); // <-- WICHTIG: disabled = false
-  jsFile.print("        el.required = requiredSingleIds.includes(id);\n");
-  jsFile.print("      }\n");
-  jsFile.print("    });\n");
-  jsFile.print("  }\n");
-  jsFile.print("}\n\n");
-
-  flushStep("Step 2 ready", jsFile, written_chunk);
-
-  // 3. SSE Handler
-  jsFile.print("/* --- SSE Logic --- */\n");
-  jsFile.print("console.log('Setting up EventSource...');\n");
-  jsFile.print("const evtSource = new EventSource('/events');\n");
-  jsFile.print("const MAX_TABLE_ROWS = 5;\n");
-  jsFile.print("function addTableRow(tableBodyId, codeData, isSentTable) {\n");
-  jsFile.print("  const tableBody = document.getElementById(tableBodyId);\n");
-  jsFile.print("  if (!tableBody) return;\n");
-  jsFile.print("  const placeholderId = isSentTable ? 'no-sent-codes' : 'no-received-codes';\n");
-  jsFile.print("  const placeholderRow = document.getElementById(placeholderId);\n");
-  jsFile.print("  if (placeholderRow) placeholderRow.remove();\n");
-  jsFile.print("  let newRowHtml = `<tr class='text-uppercase'>`;\n");
-  jsFile.print("  newRowHtml += `<td>${codeData.timestamp}</td>`;\n");
-  jsFile.print("  newRowHtml += `<td><code>${codeData.data}</code></td>`;\n");
-  jsFile.print("  newRowHtml += `<td><code>${codeData.encoding}</code></td>`;\n");
-  jsFile.print("  newRowHtml += `<td><code>${codeData.bits}</code></td>`;\n");
-  jsFile.print("  newRowHtml += `<td><code>${codeData.address || '-'}</code></td>`;\n");
-  jsFile.print("  if (isSentTable) {\n");
-  jsFile.print("    newRowHtml += `<td><code>${codeData.repeat}</code></td>`;\n");
-  jsFile.print("    newRowHtml += `<td><code>${codeData.out}</code></td>`;\n");
-  jsFile.print("  }\n");
-  jsFile.print("  newRowHtml += `</tr>`;\n");
-  jsFile.print("  tableBody.insertAdjacentHTML('afterbegin', newRowHtml);\n");
-  jsFile.print("  while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
-  jsFile.print("    tableBody.deleteRow(-1);\n");
-  jsFile.print("  }\n");
-  jsFile.print("}\n");
-  jsFile.print("evtSource.addEventListener('codeSent', function(event) {\n");
-  jsFile.print("  console.log('SSE codeSent:', event.data);\n");
-  jsFile.print("  try { const codeData = JSON.parse(event.data); addTableRow('sent-codes-body', codeData, true); } catch (e) { console.error('Error parsing codeSent data:', e); }\n");
-  jsFile.print("});\n");
-  jsFile.print("evtSource.addEventListener('codeReceived', function(event) {\n");
-  jsFile.print("  console.log('SSE codeReceived:', event.data);\n");
-  jsFile.print("  try { const codeData = JSON.parse(event.data); addTableRow('received-codes-body', codeData, false); } catch (e) { console.error('Error parsing codeReceived data:', e); }\n");
-  jsFile.print("});\n");
-  jsFile.print("evtSource.onerror = function(err) { console.error('EventSource failed:', err); };\n\n");
-
-  flushStep("Step 3 ready", jsFile, written_chunk);
-
-  // // 4. DOMContentLoaded Wrapper für DOM-Interaktionen
-  // jsFile.print("/* --- DOM Ready Initializations & Listeners --- */\n");
-  // jsFile.print("document.addEventListener('DOMContentLoaded', function() {\n\n"); // <-- WIEDER HINZUGEFÜGT
-
-  // 3. Event Listener und Initialisierungen (JETZT GLOBAL)
-  jsFile.print("/* --- Initializations & Listeners --- */\n"); // Angepasster Kommentar
-
-  // 4a. Remote Button Handler
-  jsFile.print("  /* Remote Button Handler */\n");
-  jsFile.print("  console.log('Attempting to find #remote-buttons...');\n");
-  jsFile.print("  const remoteButtonsContainer = document.getElementById('remote-buttons');\n");
-  jsFile.print("  if (remoteButtonsContainer) {\n");
-  jsFile.print("    console.log('#remote-buttons found. Attaching listener...');\n");
-  jsFile.print("    remoteButtonsContainer.addEventListener('click', function(event) {\n");
-  jsFile.print("      console.log('Click detected inside container.');\n");
-  jsFile.print("      if (event.target.classList.contains('remote-button')) {\n");
-  jsFile.print("        event.preventDefault();\n");
-  jsFile.print("        const button = event.target;\n");
-  jsFile.print("        const isMacro = button.dataset.ismacro === 'true';\n");
-  jsFile.print("        const buttonId = button.id;\n");
-  jsFile.print("        console.log('Button clicked:', button.textContent, 'Is Macro:', isMacro, 'ID:', buttonId);\n");
-  jsFile.print("        if (typeof setButtonState !== 'function') { console.error('setButtonState missing!'); alert('Internal Error'); return; }\n");
-  jsFile.print("        setButtonState(button, 'sending');\n");
-  jsFile.print("        if (isMacro) {\n");
-  jsFile.print("          if (typeof buttonMacroDataStore === 'undefined' || !buttonMacroDataStore.hasOwnProperty(buttonId)) { console.error('Macro data missing for', buttonId); setButtonState(button, 'error'); alert('Error: Macro data missing.'); return; }\n");
-  jsFile.print("          const macroJsonString = buttonMacroDataStore[buttonId];\n");
-  jsFile.print("          console.log('Sending Macro JSON:', macroJsonString);\n");
-  jsFile.print("          const formData = new URLSearchParams(); formData.append('plain', macroJsonString);\n");
-  jsFile.print("          fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
-  jsFile.print("          .then(response => { setButtonState(button, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Macro POST Error:', response.status); else console.log('Macro OK'); return response.text(); })\n");
-  jsFile.print("          .then(data => console.log('Server response macro:', data))\n");
-  jsFile.print("          .catch(error => { console.error('Fetch error macro:', error); setButtonState(button, 'error'); alert('Network Error (Macro).'); });\n");
-  jsFile.print("        } else {\n");
-  jsFile.print("          const irData = { type: button.dataset.type, data: button.dataset.data, length: parseInt(button.dataset.length, 10), address: button.dataset.address, repeat: parseInt(button.dataset.repeat, 10), out: parseInt(button.dataset.out, 10) };\n");
-  jsFile.print("          console.log('Sending Single IR:', irData);\n");
-  jsFile.print("          if (!irData.type || !irData.data || !irData.length || irData.length <= 0) { console.error('Invalid data attributes:', buttonId, irData); setButtonState(button, 'error'); alert('Error: Invalid button data.'); return; }\n");
-  jsFile.print("          const urlParams = new URLSearchParams(irData).toString();\n");
-  jsFile.print("          fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
-  jsFile.print("          .then(response => { setButtonState(button, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Single IR GET Error:', response.status); else console.log('Single IR OK'); return response.text(); })\n");
-  jsFile.print("          .then(data => console.log('Server response single IR:', data))\n");
-  jsFile.print("          .catch(error => { console.error('Fetch error single IR:', error); setButtonState(button, 'error'); alert('Network Error (Single IR).'); });\n");
-  jsFile.print("        }\n"); // end else (isMacro)
-  jsFile.print("      }\n"); // end if (event.target.classList.contains...)
-  jsFile.print("    });\n"); // end addEventListener
-  jsFile.print("  }\n\n"); // end if (remoteButtonsContainer)
-
-  flushStep("Step 4a ready", jsFile, written_chunk); 
-
-  // 4b. Test Send Button Handler
-  jsFile.print("  /* Test Send Button Handler */\n");
-  jsFile.print("  const testSendButton = document.getElementById('test-send-button');\n");
-  jsFile.print("  if (testSendButton) {\n");
-  jsFile.print("    const originalTestButtonText = testSendButton.textContent;\n");
-  jsFile.print("    testSendButton.addEventListener('click', function(event) {\n");
-  jsFile.print("      console.log('Test Send button clicked.');\n");
-  jsFile.print("      const prefix = 'btn_'; let irData = {}; let macroJsonString = ''; let isMacroTest = false;\n");
-  jsFile.print("      try {\n");
-  jsFile.print("        isMacroTest = document.querySelector('input[name=\"btn_isMacro\"]:checked').value === '1';\n");
-  jsFile.print("        if (isMacroTest) {\n");
-  jsFile.print("          macroJsonString = document.getElementById(prefix + 'macroJson').value;\n");
-  jsFile.print("          JSON.parse(macroJsonString);\n");
-  jsFile.print("        } else {\n");
-  jsFile.print("          irData.type = document.getElementById(prefix + 'type').value; irData.data = document.getElementById(prefix + 'data').value; irData.length = parseInt(document.getElementById(prefix + 'length').value, 10); irData.address = document.getElementById(prefix + 'address').value; irData.repeat = parseInt(document.getElementById(prefix + 'repeat').value, 10); irData.out = parseInt(document.getElementById(prefix + 'out').value, 10);\n");
-  jsFile.print("          if (!irData.type || !irData.data || !irData.length || irData.length <= 0) throw new Error('Missing Type, Data, or valid Length for Single IR.');\n");
-  jsFile.print("          if (!irData.repeat || irData.repeat <= 0) irData.repeat = 1;\n");
-  jsFile.print("          if (!irData.out || irData.out <= 0 || irData.out > 4) irData.out = 1;\n");
-  jsFile.print("        }\n");
-  jsFile.print("      } catch (e) { console.error('Error reading/validating form:', e); alert('Error: ' + e.message); return; }\n");
-  jsFile.print("      testSendButton.textContent = 'Sending...'; setButtonState(testSendButton, 'sending');\n");
-  jsFile.print("      if (isMacroTest) {\n");
-  jsFile.print("        console.log('Sending Test Macro JSON:', macroJsonString);\n");
-  jsFile.print("        const formData = new URLSearchParams(); formData.append('plain', macroJsonString);\n");
-  jsFile.print("        fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
-  jsFile.print("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Test Macro POST Error:', response.status); return response.text(); })\n");
-  jsFile.print("        .then(data => console.log('Server response test macro:', data))\n");
-  jsFile.print("        .catch(error => { console.error('Fetch error test macro:', error); setButtonState(testSendButton, 'error'); alert('Network Error (Test Macro).'); })\n");
-  jsFile.print("        .finally(() => { testSendButton.textContent = originalTestButtonText; });\n");
-  jsFile.print("      } else {\n");
-  jsFile.print("        console.log('Sending Test Single IR:', irData);\n");
-  jsFile.print("        const urlParams = new URLSearchParams(irData).toString();\n");
-  jsFile.print("        fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
-  jsFile.print("        .then(response => { setButtonState(testSendButton, response.ok ? 'success' : 'error'); if (!response.ok) console.error('Test Single IR GET Error:', response.status); return response.text(); })\n");
-  jsFile.print("        .then(data => console.log('Server response test single IR:', data))\n");
-  jsFile.print("        .catch(error => { console.error('Fetch error test single IR:', error); setButtonState(testSendButton, 'error'); alert('Network Error (Test Single IR).'); })\n");
-  jsFile.print("        .finally(() => { testSendButton.textContent = originalTestButtonText; });\n");
-  jsFile.print("      }\n"); // end else (isMacroTest)
-  jsFile.print("    });\n"); // end addEventListener
-  jsFile.print("  }\n\n"); // end if (testSendButton)
-
-  flushStep("Step 4b ready", jsFile, written_chunk);
-
-  // 4c. Initialisierung für toggleButtonFields (falls vorhanden)
-  jsFile.print("  /* Initial Button Form Toggle */\n");
-  jsFile.print("  const macroRadio = document.querySelector('input[name=\"btn_isMacro\"][value=\"1\"]');\n");
-  jsFile.print("  if (macroRadio) {\n");
-  jsFile.print("    if (macroRadio.checked) { toggleButtonFields(true); }\n");
-  jsFile.print("    else { const singleRadio = document.querySelector('input[name=\"btn_isMacro\"][value=\"0\"]'); if (singleRadio && singleRadio.checked) { toggleButtonFields(false); } else { toggleButtonFields(false); } }\n");
-  jsFile.print("  }\n\n");
-
-  // jsFile.print("});\n"); //(Ende DOMContentLoaded Wrapper)
-
-
-    // --- Datei schließen und Erfolg/Fehler prüfen ---
-    int writeError = jsFile.getWriteError(); // Fehlerstatus holen VOR dem Schließen
-    size_t bytesWritten = jsFile.size();     // Größe holen VOR dem Schließen
-    // Serial.printf("  Flushing file before close...\n");
-    jsFile.flush();
-    jsFile.close();                          // Datei schließen
-
-  
-    Serial.printf("  Finished writing attempts. Bytes reported before close: %d, Write Error Code: %d\n", bytesWritten, writeError); // Mehr Debugging
-
-    // --- Verbesserte Erfolgsprüfung ---
-  if (writeError == 0 && bytesWritten > 0) {
-    Serial.printf("Successfully wrote %d bytes to /js/scripts.js\n", bytesWritten);
-    // Optional: Datei nach dem Schließen erneut öffnen und Größe prüfen
-    File checkFile = LittleFS.open("/js/scripts.js", "r");
-    if (checkFile) {
-        Serial.printf("  Verification: File size after close/reopen: %d\n", checkFile.size());
-        checkFile.close();
+  // 3. Vergleiche und schreibe nur, wenn nötig
+  bool needsWrite = true; // Standardmäßig schreiben
+  if (fileExists && readSuccess) {
+    // Vergleiche den neu generierten String mit dem gelesenen String
+    if (newJsContent == existingJsContent) {
+      needsWrite = false; // Inhalte sind identisch, kein Schreiben nötig
     } else {
-        Serial.println("  Verification ERROR: Could not reopen file for size check!");
+       Serial.println("  Content differs. Update needed.");
+       // Optional: Logge Längenunterschiede oder erste paar Zeichen für Debugging
+       // Serial.printf("  New length: %d, Existing length: %d\n", newJsContent.length(), existingJsContent.length());
+    }
+  } else if (!fileExists) {
+     Serial.println("  File does not exist. Writing needed.");
+  } else { // File existed but read failed
+     Serial.println("  File existed but read failed. Overwriting needed.");
+  }
+
+  if (needsWrite) {
+    Serial.println("  Writing new content to /js/scripts.js...");
+
+    // Stelle sicher, dass das /js Verzeichnis existiert (wichtig VOR dem Schreiben)
+    if (!LittleFS.exists("/js")) {
+      if (LittleFS.mkdir("/js")) {
+        Serial.println("  Created /js directory.");
+        delay(50); // Kurze Pause kann manchmal helfen
+      } else {
+        Serial.println("  ERROR: Failed to create /js directory! Aborting write.");
+        return; // Abbrechen, wenn Verzeichnis nicht erstellt werden kann
+      }
+    }
+
+    // Öffne Datei im Schreibmodus (überschreibt vorhandene)
+    File jsFile = LittleFS.open("/js/scripts.js", "w");
+    if (!jsFile || jsFile.isDirectory()) {
+      Serial.println("  ERROR: Failed to open /js/scripts.js for writing!");
+      if (jsFile) jsFile.close();
+      return; // Abbrechen bei Fehler
+    }
+
+    // Schreibe den gesamten neuen Inhalt
+    size_t bytesWritten = jsFile.print(newJsContent);
+    int writeError = jsFile.getWriteError(); // Fehlerstatus holen
+    jsFile.close(); // Datei schließen
+
+    // Erfolg prüfen
+    if (writeError == 0 && bytesWritten == newJsContent.length()) {
+      Serial.printf("  Successfully wrote %d bytes.\n", bytesWritten);
+      // Optional: Verifizierung durch erneutes Lesen der Größe
+      File checkFile = LittleFS.open("/js/scripts.js", "r");
+      if (checkFile) {
+          Serial.printf("  Verification: File size after write: %d\n", checkFile.size());
+          checkFile.close();
+      }
+    } else {
+      Serial.println("  ERROR writing to /js/scripts.js!");
+      Serial.printf("    Bytes written: %d (expected %d), Error code: %d\n", bytesWritten, newJsContent.length(), writeError);
+      // Versuch, die potenziell korrupte Datei zu löschen
+      if (LittleFS.exists("/js/scripts.js")) {
+          LittleFS.remove("/js/scripts.js");
+      }
     }
   } else {
-    Serial.println("ERROR writing to /js/scripts.js!");
-    if (writeError != 0) {
-        Serial.printf("  Write Error Code: %d\n", writeError);
-    }
-    if (bytesWritten == 0) {
-        Serial.println("  Reason: File size reported as 0 before closing.");
-    }
-    // Versuch, die Datei zu löschen, falls sie fehlerhaft ist
-    if (LittleFS.exists("/js/scripts.js")) {
-        if (LittleFS.remove("/js/scripts.js")) {
-            Serial.println("  Attempted to remove potentially corrupted file.");
-        } else {
-            Serial.println("  ERROR: Failed to remove potentially corrupted file.");
-        }
-    }
+    Serial.println("  JavaScript file is up-to-date. Skipping write.");
   }
 
-  // Serial.printf("  Heap after JS write: %u\n", ESP.getFreeHeap());
-
+  // Heap-Status nach der Operation (optional)
+  // Serial.printf("  Heap after JS check/write: %u\n", ESP.getFreeHeap());
 }
 
 
@@ -3063,7 +3062,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
     size_t currentChunkSize = std::min(chunkSize, totalLength - i);
     // Use substring or direct pointer access if comfortable
     response->print(buttonMacroJsStore.substring(i, i + currentChunkSize));
-    Serial.printf("      Printed chunk %d/%d (%d bytes)\n", (i / chunkSize) + 1, (totalLength + chunkSize - 1) / chunkSize, currentChunkSize); // Log chunk progress
+    // Serial.printf("      Printed chunk %d/%d (%d bytes)\n", (i / chunkSize) + 1, (totalLength + chunkSize - 1) / chunkSize, currentChunkSize); // Log chunk progress
     yield(); // <--- Yield AFTER printing each chunk
   }
   // response->print(buttonMacroJsStore); // OLD: Print all at once (Remove/Comment this)
