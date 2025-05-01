@@ -140,30 +140,54 @@ struct ButtonConfig {
 std::vector<ButtonConfig> buttonConfigs;
 //+=============================================================================
 
-// Function to update the JS store string
+// Function to update the JS store string (Optimized with reserve)
+// Version OHNE deserializeJson-Validierung
 void updateButtonMacroJsStore() {
-  String tempJs = "const buttonMacroDataStore = {";
+  Serial.println("==> updateButtonMacroJsStore: Entered function (NO VALIDATION).");
+
+  String tempJs;
+  size_t estimatedSize = 8192;
+  if (!tempJs.reserve(estimatedSize)) {
+      Serial.println("  !!! WARNING: Failed to reserve memory for tempJs!");
+  } else {
+      Serial.printf("  Reserved %d bytes for tempJs.\n", estimatedSize);
+  }
+
+  tempJs = "const buttonMacroDataStore = {";
   bool firstEntry = true;
+
   for (size_t i = 0; i < buttonConfigs.size(); ++i) {
+      // Prüfe nur noch, ob es ein konfigurierter Makro-Button ist
       if (buttonConfigs[i].configured && buttonConfigs[i].isMacro) {
-          // Basic validation (already done in save, but good practice)
-          DynamicJsonDocument tempDoc(1024);
-          DeserializationError err = deserializeJson(tempDoc, buttonConfigs[i].macroJson);
-          if (!err && tempDoc.is<JsonArray>()) {
-              if (!firstEntry) {
-                  tempJs += ",";
-              }
-              // Use backticks in JS for easier string embedding in C++
-              tempJs += "\n  'btn_" + String(i) + "': `" + String(buttonConfigs[i].macroJson) + "`";
-              firstEntry = false;
-          } else {
-             Serial.printf("  Skipping invalid macro JSON for button %d in JS store.\n", i);
+
+          // --- KEINE KOPIE, KEIN deserializeJson MEHR ---
+
+          // Direkter Aufbau von tempJs mit dem Original
+          if (!firstEntry) {
+              tempJs += ",";
           }
+          tempJs += "\n  '";
+          tempJs += "btn_";
+          tempJs += String(i);
+          tempJs += "': `";
+          // --- VERWENDE DAS ORIGINAL zum Aufbau des JS-Strings ---
+          tempJs += String(buttonConfigs[i].macroJson); // Hier das Original verwenden!
+          tempJs += "`";
+          firstEntry = false;
+
+          Serial.println("      (NO VALIDATION) Added macroJson for button " + String(i));
       }
   }
   tempJs += "\n};";
-  buttonMacroJsStore = tempJs; // Update the global variable
+
+  Serial.println("    buttonMacroJsStore end tempJs " + String(tempJs) + "");
+
+  buttonMacroJsStore = tempJs;
+
+  Serial.printf("    buttonMacroJsStore updated. Length: %d\n", buttonMacroJsStore.length());
+  Serial.println("<== updateButtonMacroJsStore: Leaving function (NO VALIDATION).");
 }
+
 
 // --- Hilfsfunktion zum Senden von Code-Updates als SSE ---
 void sendCodeUpdateEvent(const char* eventName, const Code& code) {
@@ -298,7 +322,8 @@ void saveButtonConfig() {
      // --- Makro-Felder speichern ---
      buttonJson["isMacro"] = button.isMacro;
      if (button.isMacro) {
-        buttonJson["macroJson"] = button.macroJson;
+      Serial.printf("      DEBUG saveButtonConfig: Saving macroJson for '%s': %s\n", button.name, button.macroJson); // NEU
+      buttonJson["macroJson"] = button.macroJson;
         // Optional: Andere Felder auf null/default setzen, wenn Makro
         buttonJson["type"] = "";
         buttonJson["data"] = "";
@@ -1376,6 +1401,8 @@ void handleSaveButton(AsyncWebServerRequest *request) {
 
 // 2. Spezifische Validierung basierend auf isMacro
 if (isMacro) {
+  Serial.println("    DEBUG: Vor strncpy für macroJson. Lokaler Wert:"); // NEU
+  Serial.println("    >>>> " + macroJson + " <<<<"); // NEU
   // Validierung für Makro
   if (macroJson.length() == 0) {
       Serial.println("    ERROR: Validation failed! (Macro JSON missing). Redirecting.");
@@ -2574,8 +2601,15 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
       if (button.isMacro) {
           response->print("                <td><code>-</code></td>\n"); // Type N/A
           String macroSnippet = String(button.macroJson);
+
+          Serial.println("button isMacro macroJson" + String(button.macroJson));
+          Serial.println("button isMacro macroSnippet 1" + String(macroSnippet));
+          
           if (macroSnippet.length() > 30) macroSnippet = macroSnippet.substring(0, 27) + "...";
           response->print("                <td><code style='font-size: 0.8em;'>" + macroSnippet + "</code></td>\n"); // Macro Snippet
+          
+          Serial.println("button isMacro macroSnippet 2" + String(macroSnippet));
+
           response->print("                <td><code>-</code></td>\n"); // Length N/A
           response->print("                <td><code>-</code></td>\n"); // Address N/A
           response->print("                <td><code>-</code></td>\n"); // Repeat N/A
