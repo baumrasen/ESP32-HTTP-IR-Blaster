@@ -143,14 +143,11 @@ std::vector<ButtonConfig> buttonConfigs;
 // Function to update the JS store string (Optimized with reserve)
 // Version OHNE deserializeJson-Validierung
 void updateButtonMacroJsStore() {
-  Serial.println("==> updateButtonMacroJsStore: Entered function (NO VALIDATION).");
 
   String tempJs;
   size_t estimatedSize = 8192;
   if (!tempJs.reserve(estimatedSize)) {
       Serial.println("  !!! WARNING: Failed to reserve memory for tempJs!");
-  } else {
-      Serial.printf("  Reserved %d bytes for tempJs.\n", estimatedSize);
   }
 
   tempJs = "const buttonMacroDataStore = {";
@@ -174,18 +171,12 @@ void updateButtonMacroJsStore() {
           tempJs += String(buttonConfigs[i].macroJson); // Hier das Original verwenden!
           tempJs += "`";
           firstEntry = false;
-
-          Serial.println("      (NO VALIDATION) Added macroJson for button " + String(i));
       }
   }
   tempJs += "\n};";
 
-  Serial.println("    buttonMacroJsStore end tempJs " + String(tempJs) + "");
-
   buttonMacroJsStore = tempJs;
-
-  Serial.printf("    buttonMacroJsStore updated. Length: %d\n", buttonMacroJsStore.length());
-  Serial.println("<== updateButtonMacroJsStore: Leaving function (NO VALIDATION).");
+  // Serial.printf("    buttonMacroJsStore updated. Length: %d\n", buttonMacroJsStore.length());
 }
 
 
@@ -980,7 +971,7 @@ void generateAndWriteJavaScript() {
     // --- Datei schließen und Erfolg/Fehler prüfen ---
     int writeError = jsFile.getWriteError(); // Fehlerstatus holen VOR dem Schließen
     size_t bytesWritten = jsFile.size();     // Größe holen VOR dem Schließen
-    Serial.printf("  Flushing file before close...\n");
+    // Serial.printf("  Flushing file before close...\n");
     jsFile.flush();
     jsFile.close();                          // Datei schließen
 
@@ -2601,15 +2592,9 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
       if (button.isMacro) {
           response->print("                <td><code>-</code></td>\n"); // Type N/A
           String macroSnippet = String(button.macroJson);
-
-          Serial.println("button isMacro macroJson" + String(button.macroJson));
-          Serial.println("button isMacro macroSnippet 1" + String(macroSnippet));
           
           if (macroSnippet.length() > 30) macroSnippet = macroSnippet.substring(0, 27) + "...";
           response->print("                <td><code style='font-size: 0.8em;'>" + macroSnippet + "</code></td>\n"); // Macro Snippet
-          
-          Serial.println("button isMacro macroSnippet 2" + String(macroSnippet));
-
           response->print("                <td><code>-</code></td>\n"); // Length N/A
           response->print("                <td><code>-</code></td>\n"); // Address N/A
           response->print("                <td><code>-</code></td>\n"); // Repeat N/A
@@ -3056,7 +3041,6 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 void sendHomePage(AsyncWebServerRequest *request, String message, String header, int type, int httpcode) {
 
   yield(); // <--- Yield IMMEDIATELY upon entry
-  Serial.println("--> Entered sendHomePage"); // Log entry
 
   // --- Erstelle den Response Stream ---
   AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", httpcode);
@@ -3086,11 +3070,6 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 
   response->print("          </script>\n");
   // yield(); // The yield inside the loop makes this one potentially redundant, but keep it for safety for now.
-
-  Serial.println("    Starting button generation loop...");
-
-    // --- NEW Debugging around vector access ---
-  // ... (Debug-Ausgaben) ...
 
   // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN +++ // <--- Kommentar im Code
   response->print("      <div class='row'>\n");
@@ -3137,7 +3116,6 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
                 response->print(buttonHtml);
                 yield();
               }
-              Serial.println("    Button generation loop finished.");
             } else {
 
     response->print("            <p><em>No remote buttons configured yet.</em></p>\n");
@@ -3198,7 +3176,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   yield(); 
 
   // --- Add Log after lambda calls ---
-  Serial.println("    Finished generating Sent Codes rows.");
+  // Serial.println("    Finished generating Sent Codes rows.");
 
   // Platzhalterzeile mit ID versehen
   if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
@@ -3339,7 +3317,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 
   // --- Stack Check at End ---
   UBaseType_t stackHighWaterMarkEnd = uxTaskGetStackHighWaterMark(NULL);
-  Serial.printf("<-- Leaving sendHomePage (after send) (Stack HWM: %u bytes, Min Free: %u)\n", stackHighWaterMarkEnd, stackHighWaterMarkEnd); // HWM is minimum free stack
+  // Serial.printf("<-- Leaving sendHomePage (after send) (Stack HWM: %u bytes, Min Free: %u)\n", stackHighWaterMarkEnd, stackHighWaterMarkEnd); // HWM is minimum free stack
 
 }
 
