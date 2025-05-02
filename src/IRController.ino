@@ -2888,25 +2888,8 @@ void sendHeader(AsyncResponseStream *response) {
   response->print("  <body>\n");
   response->print("    <div class='container'>\n");
   response->print("      <h1><a href='https://github.com/baumrasen/ESP8266-HTTP-IR-Blaster'>Extended ESP32 IR Controller</a></h1>\n");
-  response->print("      <div class='row'>\n");
-  response->print("        <div class='col-md-12'>\n");
-  response->print("          <ul class='nav nav-pills'>\n");
 
-  String hostLink = "            <li class='active'>\n              <a href='http://" + String(host_name) + ".local" + ":" + String(port_str) + "'>Hostname <span class='badge'>" + String(host_name) + ".local" + ":" + String(port_str) + "</span></a></li>\n";
-  response->print(hostLink);
-  String localLink = "            <li class='active'>\n              <a href='http://" + WiFi.localIP().toString() + ":" + String(port_str) + "'>Local <span class='badge'>" + WiFi.localIP().toString() + ":" + String(port_str) + "</span></a></li>\n";
-  response->print(localLink);
-  String dnsLink = "            <li class='active'>\n              <a href='http://" + WiFi.dnsIP().toString() + "'>DNS <span class='badge'>" + WiFi.dnsIP().toString() + "</span></a></li>\n";
-  response->print(dnsLink);
-  // String externalIpStr = externalIP(); // Auskommentiert lassen
-  // String externalLink = ...
-  // response->print(externalLink);
-  String macLink = "            <li class='active'>\n              <a>MAC <span class='badge'>" + String(WiFi.macAddress()) + "</span></a></li>\n";
-  response->print(macLink);
-
-  response->print("          </ul>\n");
-  response->print("        </div>\n");
-  response->print("      </div><hr />\n");
+  response->print("      <hr />\n");
 }
 
 
@@ -3510,18 +3493,49 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   // +++ ENDE FORMULAR +++
 
   yield(); // Keep the existing yield after the Received table
-  
-  // --- Pin Information ---
-  response->print("      <div class='row'>\n");
-  response->print("        <div class='col-md-12'>\n");
-  response->print("          <ul class='list-unstyled'>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pinr1) + "</span> Receiving </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins1) + "</span> Transmitter 1 </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins2) + "</span> Transmitter 2 </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins3) + "</span> Transmitter 3 </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins4) + "</span> Transmitter 4 </li></ul>\n");
-  response->print("        </div>\n");
-  response->print("      </div>\n");
+
+   // +++ NEUE STRUKTUR: Device Info und Pin Config nebeneinander +++
+   response->print("      <div class='row'>\n"); // <-- Eine gemeinsame äußere Reihe für beide Blöcke
+
+   // --- Spalte 1: Device Information ---
+   response->print("        <div class='col-md-6'>\n"); // <-- Spalte 1 (Hälfte der Breite auf md+)
+   response->print("          <h3>Device Information</h3>\n");
+   response->print("          <ul class='list-unstyled'>\n");
+
+   // Hostname Info
+   String hostInfo = "            <li><strong>Hostname:</strong> <a href='http://" + String(host_name) + ".local" + ":" + String(port_str) + "'>" + String(host_name) + ".local" + ":" + String(port_str) + "</a></li>\n";
+   response->print(hostInfo);
+
+   // Local IP Info
+   String localInfo = "            <li><strong>Local IP:</strong> <a href='http://" + WiFi.localIP().toString() + ":" + String(port_str) + "'>" + WiFi.localIP().toString() + ":" + String(port_str) + "</a></li>\n";
+   response->print(localInfo);
+
+   // DNS IP Info
+   String dnsInfo = "            <li><strong>DNS IP:</strong> <a href='http://" + WiFi.dnsIP().toString() + "'>" + WiFi.dnsIP().toString() + "</a></li>\n";
+   response->print(dnsInfo);
+
+   // MAC Address Info
+   String macInfo = "            <li><strong>MAC Address:</strong> <code>" + String(WiFi.macAddress()) + "</code></li>\n";
+   response->print(macInfo);
+
+   response->print("          </ul>\n");
+   response->print("        </div>\n"); // <-- Ende Spalte 1 (col-md-6)
+
+   // --- Spalte 2: Pin Configuration ---
+   response->print("        <div class='col-md-6'>\n"); // <-- Spalte 2 (Hälfte der Breite auf md+)
+   response->print("          <h3>Pin Configuration</h3>\n");
+   response->print("          <ul class='list-unstyled'>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pinr1) + "</span> Receiving </li>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pins1) + "</span> Transmitter 1 </li>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pins2) + "</span> Transmitter 2 </li>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pins3) + "</span> Transmitter 3 </li>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pins4) + "</span> Transmitter 4 </li></ul>\n");
+   response->print("        </div>\n"); // <-- Ende Spalte 2 (col-md-6)
+
+ response->print("      </div>\n"); // <-- Ende der gemeinsamen äußeren Reihe
+ response->print("      <hr />\n"); // <-- Trennlinie NACH der Reihe
+
+ // +++ ENDE NEUE STRUKTUR +++
 
   yield();
 
