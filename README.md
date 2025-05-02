@@ -15,7 +15,7 @@ I used VS Code with PlatformIO.
 
 ## Blumfeldt / Smart Beam
 
-<img width="250" src="https://raw.githubusercontent.com/baumrasen/ESP8266-HTTP-IR-Blaster/refs/heads/master/remote_example.png">
+<img width="250" src="https://raw.githubusercontent.com/baumrasen/ESP32-HTTP-IR-Blaster/refs/heads/master/remote_example.png">
 
 Command	Type	Length	Address
 
