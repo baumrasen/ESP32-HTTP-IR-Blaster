@@ -24,6 +24,8 @@
 // User settings are below here
 //+=============================================================================
 
+const int timeZone = 2;
+
 const bool getExternalIP = false;                               // Set to false to disable querying external IP
 
 const unsigned int captureBufSize = 1024;                      // Size of the IR capture buffer.
@@ -3217,374 +3219,185 @@ void sendHeader(AsyncResponseStream *response) {
 
 
 //+=============================================================================
-// Send footer HTML (AsyncResponseStream Version)
+// Send footer HTML (AsyncResponseStream Version) - DREI SPALTEN NEBENEINANDER
 void sendFooter(AsyncResponseStream *response) {
 
-     // +++ STRUKTUR: Device Info und Pin Config nebeneinander +++
-   response->print("      <div class='row'>\n"); // <-- Eine gemeinsame äußere Reihe für beide Blöcke
+  // --- Reihe 1: Device Info, Pin Config, Memory Usage (nebeneinander) ---
+  response->print("      <div class='row'>\n"); // <-- Die EINE Reihe für alle drei
 
-   // --- Spalte 1: Device Information ---
-   response->print("        <div class='col-md-6'>\n"); // <-- Spalte 1 (Hälfte der Breite auf md+)
-   response->print("          <h3>Device Information</h3>\n");
-   response->print("          <ul class='list-unstyled'>\n");
+  // --- Spalte 1: Device Information ---
+  response->print("        <div class='col-md-4'>\n"); // <-- Spalte 1 (1/3 Breite)
+  response->print("          <h4>Device Information</h4>\n"); // Kleinere Überschrift (h4)
+  response->print("          <ul class='list-unstyled' style='font-size: 0.9em;'>\n"); // Kleinere Schrift
 
-   // Hostname Info
-   String hostInfo = "            <li><strong>Hostname:</strong> <a href='http://" + String(host_name) + ".local" + ":" + String(port_str) + "'>" + String(host_name) + ".local" + ":" + String(port_str) + "</a></li>\n";
-   response->print(hostInfo);
+  // Hostname Info
+  String hostInfo = "            <li><strong>Hostname:</strong> <a href='http://" + String(host_name) + ".local" + ":" + String(port_str) + "'>" + String(host_name) + ".local" + ":" + String(port_str) + "</a></li>\n";
+  response->print(hostInfo);
 
-   // Local IP Info
-   String localInfo = "            <li><strong>Local IP:</strong> <a href='http://" + WiFi.localIP().toString() + ":" + String(port_str) + "'>" + WiFi.localIP().toString() + ":" + String(port_str) + "</a></li>\n";
-   response->print(localInfo);
+  // Local IP Info
+  String localInfo = "            <li><strong>Local IP:</strong> <a href='http://" + WiFi.localIP().toString() + ":" + String(port_str) + "'>" + WiFi.localIP().toString() + ":" + String(port_str) + "</a></li>\n";
+  response->print(localInfo);
 
-   // DNS IP Info
-   String dnsInfo = "            <li><strong>DNS IP:</strong> <a href='http://" + WiFi.dnsIP().toString() + "'>" + WiFi.dnsIP().toString() + "</a></li>\n";
-   response->print(dnsInfo);
+  // DNS IP Info
+  String dnsInfo = "            <li><strong>DNS IP:</strong> <a href='http://" + WiFi.dnsIP().toString() + "'>" + WiFi.dnsIP().toString() + "</a></li>\n";
+  response->print(dnsInfo);
 
-   // MAC Address Info
-   String macInfo = "            <li><strong>MAC Address:</strong> <code>" + String(WiFi.macAddress()) + "</code></li>\n";
-   response->print(macInfo);
+  // MAC Address Info
+  String macInfo = "            <li><strong>MAC Address:</strong> <code>" + String(WiFi.macAddress()) + "</code></li>\n";
+  response->print(macInfo);
 
-   response->print("          </ul>\n");
-   response->print("        </div>\n"); // <-- Ende Spalte 1 (col-md-6)
+  response->print("          </ul>\n");
+  response->print("        </div>\n"); // <-- Ende Spalte 1 (Device Info)
 
-   // --- Spalte 2: Pin Configuration ---
-   response->print("        <div class='col-md-6'>\n"); // <-- Spalte 2 (Hälfte der Breite auf md+)
-   response->print("          <h3>Pin Configuration</h3>\n");
-   response->print("          <ul class='list-unstyled'>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pinr1) + "</span> Receiving </li>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pins1) + "</span> Transmitter 1 </li>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pins2) + "</span> Transmitter 2 </li>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pins3) + "</span> Transmitter 3 </li>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pins4) + "</span> Transmitter 4 </li></ul>\n");
-   response->print("        </div>\n"); // <-- Ende Spalte 2 (col-md-6)
+  // --- Spalte 2: Pin Configuration ---
+  response->print("        <div class='col-md-4'>\n"); // <-- Spalte 2 (1/3 Breite)
+  response->print("          <h4>Pin Configuration</h4>\n"); // Kleinere Überschrift (h4)
+  response->print("          <ul class='list-unstyled' style='font-size: 0.9em;'>\n"); // Kleinere Schrift
+  response->print("            <li><span class='badge'>GPIO " + String(pinr1) + "</span> Receiving </li>\n");
+  response->print("            <li><span class='badge'>GPIO " + String(pins1) + "</span> Transmitter 1 </li>\n");
+  response->print("            <li><span class='badge'>GPIO " + String(pins2) + "</span> Transmitter 2 </li>\n");
+  response->print("            <li><span class='badge'>GPIO " + String(pins3) + "</span> Transmitter 3 </li>\n");
+  response->print("            <li><span class='badge'>GPIO " + String(pins4) + "</span> Transmitter 4 </li></ul>\n");
+  response->print("        </div>\n"); // <-- Ende Spalte 2 (Pin Config)
 
-    response->print("      </div>\n"); // <-- Ende der gemeinsamen äußeren Reihe
-    response->print("      <hr />\n"); // <-- Trennlinie NACH der Reihe
+  // --- Spalte 3: Memory Usage ---
+  response->print("        <div class='col-md-4'>\n"); // <-- Spalte 3 (1/3 Breite)
+  response->print("          <h4>Memory Usage</h4>\n"); // Kleinere Überschrift (h4)
 
-    // +++ ENDE STRUKTUR +++
+  // --- Variablen und Berechnungen für Memory Usage (innerhalb der Spalte) ---
+  char buffer[60];
+  int barWidth = 10; // Schmalere Balken für weniger Platz
 
-    yield();
-// --- Uptime and Epoch ---
-  // OLD Line that calls now():
-  // String uptimeEpochLine = "      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime; EPOCH " + String(now() - (timeZone * SECS_PER_HOUR)) + "</em> / <em id='jepoch'></em> ( <em id='jdiff'></em> )</div></div>\n";
+  // --- LittleFS ---
+  uint32_t totalBytesFS = 0;
+  uint32_t usedBytesFS = 0;
+  float percentFS = 0;
+  float usedKB_fs = 0;
+  String bar_fs = "";
+  String fsStatus = "OK";
+  totalBytesFS = LittleFS.totalBytes();
+  usedBytesFS = LittleFS.usedBytes();
+  if (totalBytesFS > 0) {
+      percentFS = (float)usedBytesFS / totalBytesFS * 100.0;
+      usedKB_fs = (float)usedBytesFS / 1024.0;
+      int filled = round(percentFS / 100.0 * barWidth);
+      for (int i = 0; i < barWidth; i++) { bar_fs += (i < filled) ? "=" : "-"; }
+  } else { fsStatus = "Size Error"; }
 
-  // // NEW Line (without server-side now()):
-  // String uptimeEpochLine = "      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime</em> / Client Epoch: <em id='jepoch'></em> / Diff: <em id='jdiff'></em></div></div>\n";
-  // response->print(uptimeEpochLine);
+  // --- Flash (Sketch) ---
+  uint32_t sketchSize = ESP.getSketchSize();
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  uint32_t totalSketchPartitionSize = 0;
+  float percentFlash = 0;
+  float usedKB_flash = 0;
+  String bar_flash = "";
+  String flashStatus = "OK";
+  if (running != NULL) {
+      totalSketchPartitionSize = running->size;
+      if (totalSketchPartitionSize > 0) {
+          percentFlash = (float)sketchSize / totalSketchPartitionSize * 100.0;
+          usedKB_flash = (float)sketchSize / 1024.0;
+          int filled = round(percentFlash / 100.0 * barWidth);
+          for (int i = 0; i < barWidth; i++) { bar_flash += (i < filled) ? "=" : "-"; }
+      } else { flashStatus = "Size Error"; }
+  } else { flashStatus = "Partition Error"; }
 
-  // response->print("      <script>document.getElementById('jepoch').innerHTML = Math.round((new Date()).getTime() / 1000)</script>");
-  // response->print("      <script>document.getElementById('jdiff').innerHTML = Math.abs(Math.round((new Date()).getTime() / 1000) - " + String(now() - (timeZone * SECS_PER_HOUR)) + ")</script>");
+  // --- Heap (RAM) ---
+  uint32_t totalHeap = ESP.getHeapSize();
+  uint32_t freeHeap = ESP.getFreeHeap();
+  uint32_t usedHeap = totalHeap - freeHeap;
+  float percentHeap = 0;
+  float usedKB_heap = 0;
+  String bar_heap = "";
+  if (totalHeap > 0) {
+      percentHeap = (float)usedHeap / totalHeap * 100.0;
+      usedKB_heap = (float)usedHeap / 1024.0;
+      int filled = round(percentHeap / 100.0 * barWidth);
+      for (int i = 0; i < barWidth; i++) { bar_heap += (i < filled) ? "=" : "-"; }
+  }
+  // --- ENDE Memory Usage Variablen & Berechnungen ---
 
-  // yield(); // <-- ADD YIELD after initial scripts
+  // --- Memory Usage Tabelle HTML (innerhalb der Spalte, noch kompakter) ---
+  response->print("          <table class='table table-condensed table-bordered' style='font-size: 0.8em;'>\n"); // Noch kleinere Schrift
+  response->print("            <thead>\n");
+  response->print("              <tr><th>T</th><th>Used</th><th>Total</th><th>%</th><th>Graph</th></tr>\n"); // Sehr kurze Header
+  response->print("            </thead>\n");
+  response->print("            <tbody>\n");
 
-  // // +++ Speicherbelegung als Tabelle +++
-  // response->print("      <div class='row'>\n");
-  // response->print("        <div class='col-md-12'>\n");
-  // response->print("          <h4>Memory Usage</h4>\n");
-  // response->print("          <table class='table table-condensed table-bordered' style='font-size: 0.9em; max-width: 600px;'>\n");
-  // response->print("            <thead>\n");
-  // response->print("              <tr><th>Type</th><th>Used</th><th>Partition Size</th><th>Usage (%)</th><th>Graph</th></tr>\n");
-  // response->print("            </thead>\n");
-  // response->print("            <tbody>\n");
+  // --- LittleFS Zeile ---
+  response->print("              <tr>\n");
+  response->print("                <td>FS</td>\n");
+  if (fsStatus == "OK" && totalBytesFS > 0) {
+      snprintf(buffer, sizeof(buffer), "%.0fK", usedKB_fs); // Keine Nachkommastelle
+      response->print("                <td>" + String(buffer) + "</td>\n");
+      snprintf(buffer, sizeof(buffer), "%.0fK", (float)totalBytesFS / 1024.0); // Keine Nachkommastelle
+      response->print("                <td>" + String(buffer) + "</td>\n");
+      snprintf(buffer, sizeof(buffer), "%.0f", percentFS); // Keine Nachkommastelle, kein %
+      response->print("                <td>" + String(buffer) + "</td>\n");
+      response->print("                <td><samp>" + bar_fs + "</samp></td>\n");
+  } else { response->print("                <td colspan='4' class='text-danger'>" + fsStatus + "</td>\n"); }
+  response->print("              </tr>\n");
 
-  // char buffer[60];
-  // int barWidth = 15;
+  // --- Flash (Sketch) Zeile ---
+  response->print("              <tr>\n");
+  response->print("                <td>App</td>\n");
+  if (flashStatus == "OK" && totalSketchPartitionSize > 0) {
+      snprintf(buffer, sizeof(buffer), "%.0fK", usedKB_flash); // Keine Nachkommastelle
+      response->print("                <td>" + String(buffer) + "</td>\n");
+      snprintf(buffer, sizeof(buffer), "%.0fK", (float)totalSketchPartitionSize / 1024.0); // Keine Nachkommastelle
+      response->print("                <td>" + String(buffer) + "</td>\n");
+      snprintf(buffer, sizeof(buffer), "%.0f", percentFlash); // Keine Nachkommastelle, kein %
+      response->print("                <td>" + String(buffer) + "</td>\n");
+      response->print("                <td><samp>" + bar_flash + "</samp></td>\n");
+  } else { response->print("                <td colspan='4' class='text-danger'>" + flashStatus + "</td>\n"); }
+  response->print("              </tr>\n");
 
-  // // --- LittleFS ---
-  // uint32_t totalBytesFS = 0;
-  // uint32_t usedBytesFS = 0;
-  // String fsStatus = "OK";
-  // if (LittleFS.begin()) {
-  //     totalBytesFS = LittleFS.totalBytes();
-  //     usedBytesFS = LittleFS.usedBytes();
-  // } else {
-  //     fsStatus = "Mount Error";
-  //     Serial.println("Error: LittleFS not mounted when trying to get size info for footer.");
-  // }
-  // response->print("              <tr>\n");
-  // response->print("                <td>Filesystem</td>\n");
-  // if (totalBytesFS > 0) {
-  //     // ... (Berechnungen) ...
-  //     snprintf(buffer, sizeof(buffer), "%.1f KB", usedKB_fs);
-  //     response->print("                <td>" + String(buffer) + "</td>\n");
-  //     // ... (Restliche FS-Zeile mit response->print) ...
-  //     response->print("                <td><samp>" + bar_fs + "</samp></td>\n");
-  // } else {
-  //     response->print("                <td colspan='4' class='text-danger'>" + fsStatus + "</td>\n");
-  // }
-  // response->print("              </tr>\n");
+  // --- Heap (RAM) Zeile ---
+  response->print("              <tr>\n");
+  response->print("                <td>RAM</td>\n");
+  if (totalHeap > 0) {
+      snprintf(buffer, sizeof(buffer), "%.0fK", usedKB_heap); // Keine Nachkommastelle
+      response->print("                <td>" + String(buffer) + "</td>\n");
+      snprintf(buffer, sizeof(buffer), "%.0fK", (float)totalHeap / 1024.0); // Keine Nachkommastelle
+      response->print("                <td>" + String(buffer) + "</td>\n");
+      snprintf(buffer, sizeof(buffer), "%.0f", percentHeap); // Keine Nachkommastelle, kein %
+      response->print("                <td>" + String(buffer) + "</td>\n");
+      response->print("                <td><samp>" + bar_heap + "</samp></td>\n");
+  } else { response->print("                <td colspan='4' class='text-danger'>N/A</td>\n"); }
+  response->print("              </tr>\n");
 
-  // // --- Flash (Sketch) ---
-  // // ... (Berechnungen) ...
-  // response->print("              <tr>\n");
-  // response->print("                <td>Flash (App Partition)</td>\n");
-  // if (totalSketchPartitionSize > 0) {
-  //     // ... (Berechnungen) ...
-  //     snprintf(buffer, sizeof(buffer), "%.1f KB", usedKB_flash);
-  //     response->print("                <td>" + String(buffer) + "</td>\n");
-  //     // ... (Restliche Flash-Zeile mit response->print) ...
-  //     response->print("                <td><samp>" + bar_flash + "</samp></td>\n");
-  // } else {
-  //     response->print("                <td colspan='4' class='text-danger'>" + flashStatus + "</td>\n");
-  // }
-  // response->print("              </tr>\n");
+  // --- Tabelle beenden ---
+  response->print("            </tbody>\n");
+  response->print("          </table>\n");
+  // --- ENDE Memory Usage Tabelle HTML ---
 
-  // // --- Heap (RAM) ---
-  // // ... (Berechnungen) ...
-  // response->print("              <tr>\n");
-  // response->print("                <td>Heap (RAM)</td>\n");
-  // if (totalHeap > 0) {
-  //     // ... (Berechnungen) ...
-  //     snprintf(buffer, sizeof(buffer), "%.1f KB", usedKB_heap);
-  //     response->print("                <td>" + String(buffer) + "</td>\n");
-  //     // ... (Restliche Heap-Zeile mit response->print) ...
-  //     response->print("                <td><samp>" + bar_heap + "</samp></td>\n");
-  // } else {
-  //     response->print("                <td colspan='4' class='text-danger'>Unavailable</td>\n");
-  // }
-  // response->print("              </tr>\n");
+  response->print("        </div>\n"); // <-- Ende Spalte 3 (Memory Usage)
+  response->print("      </div>\n");   // <-- Ende der EINEN Reihe
+  response->print("      <hr />\n");   // <-- Trennlinie NACH der 3-Spalten-Reihe
 
-  // // --- Tabelle beenden ---
-  // response->print("            </tbody>\n");
-  // response->print("          </table>\n");
-  // response->print("        </div>\n");
-  // response->print("      </div>\n");
+  // --- Uptime and Epoch (bleibt darunter in eigener Reihe) ---
+  yield();
+  response->print("      <div class='row'>\n"); // <-- Eigene Reihe für Uptime/Epoch
+  response->print("        <div class='col-md-12'>\n"); // Volle Breite
+  String uptimeEpochLine = "<em>" + String(millis()) + "ms uptime</em> / Client Epoch: <em id='jepoch'></em> / Diff: <em id='jdiff'></em>\n";
+  response->print(uptimeEpochLine);
+  response->print("        </div>\n");
+  response->print("      </div>\n"); // <-- Ende Uptime/Epoch Reihe
+
+  // --- Die Scripts für Epoch bleiben hier ---
+  response->print("      <script>document.getElementById('jepoch').innerHTML = Math.round((new Date()).getTime() / 1000)</script>");
+  response->print("      <script>document.getElementById('jdiff').innerHTML = Math.abs(Math.round((new Date()).getTime() / 1000) - " + String(now() - (timeZone * SECS_PER_HOUR)) + ")</script>");
 
   yield(); // <-- ADD YIELD after initial scripts
 
-  //   // --- NEU: JavaScript für Server-Sent Events ---
-  // response->print("      <script>\n");
+  // --- Restlicher Footer (Container Ende, JS Link, Body/HTML Ende) ---
+  response->print("    </div>\n"); // Ende .container
 
-  // // --- NEU: JavaScript zum Umschalten der Button-Formularfelder ---
-  // response->print("        // Funktion zum Umschalten der Felder im Button-Formular\n");
-  // response->print("        function toggleButtonFields(isMacro) {\n");
-  // response->print("          const singleFields = document.getElementById('single-ir-fields');\n");
-  // response->print("          const macroField = document.getElementById('macro-json-field');\n");
-  // response->print("          const requiredSingleIds = ['btn_type', 'btn_data', 'btn_length']; // IDs der Pflichtfelder für Single IR\n");
-  // response->print("          const requiredMacroIds = ['btn_macroJson']; // IDs der Pflichtfelder für Macro\n");
-  // response->print("\n");
-  // response->print("          if (isMacro) {\n");
-  // response->print("            if (singleFields) singleFields.style.display = 'none';\n");
-  // response->print("            if (macroField) macroField.style.display = 'block';\n");
-  // response->print("            // Macro-Feld erforderlich machen, Single-Felder nicht\n");
-  // response->print("            requiredSingleIds.forEach(id => {\n");
-  // response->print("                const el = document.getElementById(id);\n");
-  // response->print("                if (el) el.required = false;\n");
-  // response->print("            });\n");
-  // response->print("            requiredMacroIds.forEach(id => {\n");
-  // response->print("                const el = document.getElementById(id);\n");
-  // response->print("                if (el) el.required = true;\n");
-  // response->print("            });\n");
-  // response->print("          } else {\n");
-  // response->print("            if (singleFields) singleFields.style.display = 'block';\n");
-  // response->print("            if (macroField) macroField.style.display = 'none';\n");
-  // response->print("            // Single-Felder erforderlich machen, Macro-Feld nicht\n");
-  // response->print("            requiredSingleIds.forEach(id => {\n");
-  // response->print("                const el = document.getElementById(id);\n");
-  // response->print("                if (el) el.required = true;\n");
-  // response->print("            });\n");
-  // response->print("            requiredMacroIds.forEach(id => {\n");
-  // response->print("                const el = document.getElementById(id);\n");
-  // response->print("                if (el) el.required = false;\n");
-  // response->print("            });\n");
-  // response->print("          }\n");
-  // response->print("        }\n");
-  // response->print("\n");
-  // response->print("        // Sicherstellen, dass die Felder beim Laden der Seite korrekt angezeigt werden\n");
-  // response->print("        document.addEventListener('DOMContentLoaded', function() {\n");
-  // response->print("            // Prüfen, ob wir auf einer Seite mit dem Button-Formular sind\n");
-  // response->print("            const macroRadio = document.querySelector('input[name=\\\"btn_isMacro\\\"][value=\\\"1\\\"]');\n"); // Escaped quotes!
-  // response->print("            if (macroRadio) { // Nur ausführen, wenn Radio-Button existiert\n");
-  // response->print("              if (macroRadio.checked) {\n");
-  // response->print("                  toggleButtonFields(true);\n");
-  // response->print("              } else {\n");
-  // response->print("                  // Sicherstellen, dass der andere Radio-Button existiert, bevor wir umschalten\n");
-  // response->print("                  const singleRadio = document.querySelector('input[name=\\\"btn_isMacro\\\"][value=\\\"0\\\"]');\n"); // Escaped quotes!
-  // response->print("                  if (singleRadio && singleRadio.checked) {\n");
-  // response->print("                     toggleButtonFields(false);\n");
-  // response->print("                  } else { \n");
-  // response->print("                     // Fallback, falls keiner gecheckt ist (sollte nicht passieren, aber sicher ist sicher)\n");
-  // response->print("                     toggleButtonFields(false);\n");
-  // response->print("                  }\n");
-  // response->print("              }\n");
-  // response->print("            }\n");
-  // response->print("        });\n");
-  // --- ENDE NEU ---
+  // --- Lade das generierte Skript am Ende des Body ---
+  response->print("    <script src='/js/scripts.js'></script>\n");
 
-  // response->print("        console.log('Setting up EventSource...');\n");
-  // response->print("        const evtSource = new EventSource('/events');\n");
-  // response->print("        const MAX_TABLE_ROWS = 5; // Max Zeilen pro Tabelle\n");
-
-  // response->print("        // Funktion zum Hinzufügen einer Zeile zu einer Tabelle\n");
-  // response->print("        function addTableRow(tableBodyId, codeData, isSentTable) {\n");
-  // response->print("          const tableBody = document.getElementById(tableBodyId);\n");
-  // response->print("          if (!tableBody) return;\n");
-
-  // response->print("          // Platzhalter entfernen, falls vorhanden\n");
-  // response->print("          const placeholderId = isSentTable ? 'no-sent-codes' : 'no-received-codes';\n");
-  // response->print("          const placeholderRow = document.getElementById(placeholderId);\n");
-  // response->print("          if (placeholderRow) placeholderRow.remove();\n");
-
-  // response->print("          // Neue Zeile erstellen\n");
-  // response->print("          let newRowHtml = `<tr class='text-uppercase'>`;\n");
-  // response->print("          newRowHtml += `<td>${codeData.timestamp}</td>`;\n");
-  // response->print("          newRowHtml += `<td><code>${codeData.data}</code></td>`;\n");
-  // response->print("          newRowHtml += `<td><code>${codeData.encoding}</code></td>`;\n");
-  // response->print("          newRowHtml += `<td><code>${codeData.bits}</code></td>`;\n");
-  // response->print("          newRowHtml += `<td><code>${codeData.address || '-'}</code></td>`;\n");
-  // response->print("          if (isSentTable) {\n"); // Zusätzliche Spalten für 'Sent' Tabelle
-  // response->print("            newRowHtml += `<td><code>${codeData.repeat}</code></td>`;\n");
-  // response->print("            newRowHtml += `<td><code>${codeData.out}</code></td>`;\n");
-  // response->print("          }\n");
-  // response->print("          newRowHtml += `</tr>`;\n");
-
-  // response->print("          // Zeile am Anfang einfügen\n");
-  // response->print("          tableBody.insertAdjacentHTML('afterbegin', newRowHtml);\n");
-
-  // response->print("          // Alte Zeilen entfernen, wenn Limit überschritten\n");
-  // response->print("          while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
-  // response->print("            tableBody.deleteRow(-1); // Letzte Zeile löschen\n");
-  // response->print("          }\n");
-  // response->print("        }\n");
-
-  // response->print("        // Event Listener für gesendete Codes\n");
-  // response->print("        evtSource.addEventListener('codeSent', function(event) {\n");
-  // response->print("          console.log('SSE codeSent:', event.data);\n");
-  // response->print("          try {\n");
-  // response->print("            const codeData = JSON.parse(event.data);\n");
-  // response->print("            addTableRow('sent-codes-body', codeData, true);\n");
-  // response->print("          } catch (e) {\n");
-  // response->print("            console.error('Error parsing codeSent data:', e);\n");
-  // response->print("          }\n");
-  // response->print("        });\n");
-
-  // response->print("        // Event Listener für empfangene Codes\n");
-  // response->print("        evtSource.addEventListener('codeReceived', function(event) {\n");
-  // response->print("          console.log('SSE codeReceived:', event.data);\n");
-  // response->print("          try {\n");
-  // response->print("            const codeData = JSON.parse(event.data);\n");
-  // response->print("            addTableRow('received-codes-body', codeData, false);\n");
-  // response->print("          } catch (e) {\n");
-  // response->print("            console.error('Error parsing codeReceived data:', e);\n");
-  // response->print("          }\n");
-  // response->print("        });\n");
-
-  // response->print("        // Optional: Fehlerbehandlung für die SSE-Verbindung\n");
-  // response->print("        evtSource.onerror = function(err) {\n");
-  // response->print("          console.error('EventSource failed:', err);\n");
-  // response->print("          // Optional: Versuch, die Verbindung wiederherzustellen oder Benutzer informieren\n");
-  // response->print("        };\n");
-
-  // response->print("      </script>\n");
-  // --- ENDE NEU ---
-
-//   yield(); // <-- ADD YIELD after initial scripts
-
-//  // --- JavaScript für Test Send Button ---
-//  response->print("      <script>\n");
-//  response->print("        const testSendButton = document.getElementById('test-send-button');\n");
-//  response->print("        if (testSendButton) {\n"); // Nur ausführen, wenn der Button existiert
-//  response->print("          testSendButton.addEventListener('click', function(event) {\n");
-//  response->print("            console.log('Test Send button clicked.');\n");
-//  response->print("            // 1. Werte aus Formularfeldern lesen\n");
-//  response->print("            const irData = {};\n");
-//  response->print("            const prefix = 'btn_'; // Prefix der Formularfeld-IDs\n");
-//  response->print("            try {\n"); // Fehler abfangen, falls Elemente nicht gefunden werden
-//  response->print("              irData.type = document.getElementById(prefix + 'type').value;\n");
-//  response->print("              irData.data = document.getElementById(prefix + 'data').value;\n");
-//  response->print("              irData.length = parseInt(document.getElementById(prefix + 'length').value, 10);\n");
-//  response->print("              irData.address = document.getElementById(prefix + 'address').value;\n");
-//  response->print("              irData.repeat = parseInt(document.getElementById(prefix + 'repeat').value, 10);\n");
-//  response->print("              irData.out = parseInt(document.getElementById(prefix + 'out').value, 10);\n");
-//  response->print("            } catch (e) {\n");
-//  response->print("              console.error('Error reading form values:', e);\n");
-//  response->print("              alert('Error reading form values. Check console.');\n");
-//  response->print("              return; // Abbruch\n");
-//  response->print("            }\n");
-
-//  response->print("            // 2. Prüfen, ob Makro oder Single IR\n");
-//   response->print("            const isMacroTest = document.querySelector('input[name=\\\"btn_isMacro\\\"]:checked').value === '1';\n"); // Escaped quotes!
-//   response->print("\n");
-//   response->print("            // 3. Visuelles Feedback (optional)\n");
-//   response->print("            const originalText = testSendButton.textContent;\n");
-//   response->print("            testSendButton.textContent = 'Sending...';\n");
-//   response->print("            testSendButton.disabled = true;\n");
-//   response->print("\n");
-//   response->print("            if (isMacroTest) {\n");
-//   response->print("              // --- Test Send für Makro --- \n");
-//   response->print("              const macroJsonString = document.getElementById(prefix + 'macroJson').value;\n");
-//   response->print("              // JSON Validierung im Browser (optional aber gut)\n");
-//   response->print("              try {\n");
-//   response->print("                JSON.parse(macroJsonString);\n"); // Versuch zu parsen
-//   response->print("              } catch (e) {\n");
-//   response->print("                alert('Invalid JSON format in Macro field: ' + e.message);\n");
-//   response->print("                testSendButton.textContent = originalText;\n");
-//   response->print("                testSendButton.disabled = false;\n");
-//   response->print("                return;\n"); // Abbruch
-//   response->print("              }\n");
-//   response->print("              console.log('Sending Test Macro JSON:', macroJsonString);\n");
-//   response->print("\n");
-//   response->print("              const formData = new URLSearchParams();\n");
-//   response->print("              formData.append('plain', macroJsonString);\n");
-//   response->print("\n");
-//   response->print("              fetch('/json', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: formData })\n");
-//   response->print("              .then(response => {\n");
-//   // ... (Fetch-Logik für Makro) ...
-//   response->print("              })\n");
-//   response->print("              .then(data => console.log('Server response to test macro:', data))\n");
-//   response->print("              .catch(error => {\n");
-//   // ... (Catch-Logik für Makro) ...
-//   response->print("              })\n");
-//   response->print("              .finally(() => {\n");
-//   response->print("                testSendButton.textContent = originalText;\n");
-//   response->print("                testSendButton.disabled = false;\n");
-//   response->print("              });\n");
-//   response->print("\n");
-//   response->print("            } else {\n");
-//   response->print("              // --- Test Send für Single IR --- \n");
-//   response->print("              // Einfache Validierung (nur für Single IR relevant hier)\n");
-//   response->print("              if (!irData.type || !irData.data || !irData.length || irData.length <= 0) {\n");
-//   response->print("                alert('Please fill in at least Type, Data, and a valid Length (>0) for Single IR.');\n");
-//   response->print("                testSendButton.textContent = originalText;\n"); // Reset Button before return
-//   response->print("                testSendButton.disabled = false;\n");
-//   response->print("                return; // Abbruch\n");
-//   response->print("              }\n");
-//   response->print("              if (!irData.repeat || irData.repeat <= 0) irData.repeat = 1;\n"); // Default repeat
-//   response->print("              if (!irData.out || irData.out <= 0 || irData.out > 4) irData.out = 1;\n"); // Default out
-//   response->print("\n");
-//   response->print("              console.log('Sending Test Single IR:', irData);\n");
-//   response->print("              const urlParams = new URLSearchParams({\n");
-//   // ... (URL Parameter für Single IR) ...
-//   response->print("              }).toString();\n");
-//   response->print("\n");
-//   response->print("              fetch(`/sendbutton?${urlParams}`, { method: 'GET' })\n");
-//   response->print("              .then(response => {\n");
-//   // ... (Fetch-Logik für Single IR) ...
-//   response->print("              })\n");
-//   response->print("              .then(data => console.log('Server response to test single IR:', data))\n");
-//   response->print("              .catch(error => {\n");
-//   // ... (Catch-Logik für Single IR) ...
-//   response->print("              })\n");
-//   response->print("              .finally(() => {\n");
-//   response->print("                testSendButton.textContent = originalText;\n");
-//   response->print("                testSendButton.disabled = false;\n");
-//   response->print("              });\n");
-//   response->print("            }\n"); // Ende else (Single IR Test)
-//   response->print("          });\n"); // Ende Event Listener
-//   response->print("        }\n"); // Ende if (testSendButton)
-//   // --- ENDE Test Send Button ---
-
-//  response->print("      </script>\n");
-//  // --- ENDE NEU ---
-//  yield(); // <-- ADD YIELD after initial scripts
-
-response->print("    </div>\n"); // Ende .container
-
-   // --- Lade das generierte Skript am Ende des Body ---
-   response->print("    <script src='/js/scripts.js'></script>\n");
-
- response->print("  </body>\n");
- response->print("</html>\n");
+  response->print("  </body>\n");
+  response->print("</html>\n");
 }
 
 
