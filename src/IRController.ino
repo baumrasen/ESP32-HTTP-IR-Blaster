@@ -137,6 +137,7 @@ struct ButtonConfig {
   bool configured = false; // Ist dieser Button-Slot konfiguriert?
   int layoutRow = -1; // Zeile im Layout (-1 = nicht spezifiziert/Standardfluss)
   int layoutCol = -1; // Spalte im Layout (-1 = nicht spezifiziert/Standardfluss)
+  char colorClass[16] = "btn-primary"; // Bootstrap-Klasse (z.B. "btn-success"), Default: primary
  
 };
 
@@ -271,6 +272,7 @@ bool saveConfigToFile(const char* filePath) {
      }
      buttonJson["layoutRow"] = button.layoutRow;
      buttonJson["layoutCol"] = button.layoutCol;
+     buttonJson["colorClass"] = button.colorClass;
   }
 
   File configFile = LittleFS.open(filePath, "w");
@@ -560,7 +562,9 @@ void loadButtonConfig() {
           newButton.macroJson[sizeof(newButton.macroJson) - 1] = '\0';
           newButton.layoutRow = buttonJson["layoutRow"] | -1; // Default -1, falls nicht in JSON
           newButton.layoutCol = buttonJson["layoutCol"] | -1; // Default -1, falls nicht in JSON
-
+          strncpy(newButton.colorClass, buttonJson["colorClass"] | "btn-primary", sizeof(newButton.colorClass) - 1); // Default "btn-primary"
+          newButton.colorClass[sizeof(newButton.colorClass) - 1] = '\0'; // Null-terminieren
+          
 
           // Gültigkeitsprüfung anpassen:
           // Ein Button ist gültig, wenn er einen Namen hat UND
@@ -1287,6 +1291,30 @@ void generateAndWriteJavaScript() {
 }
 
 
+// --- Hilfsfunktion für Farb-Dropdown (kann global oder innerhalb von generateButtonForm platziert werden) ---
+String generateColorDropdownHtml(const String& selectName, const String& selectedValue) {
+  String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
+  const char* colors[][2] = { // Array von Paaren: [Klasse, Angezeigter Name]
+      {"btn-primary", "Primary (Blue)"},
+      {"btn-success", "Success (Green)"},
+      {"btn-info",    "Info (Light Blue)"},
+      {"btn-warning", "Warning (Orange)"},
+      {"btn-danger",  "Danger (Red)"},
+      {"btn-default", "Default (Gray)"}
+      // Füge hier bei Bedarf weitere hinzu (z.B. btn-link)
+  };
+  for (const auto& colorPair : colors) {
+      html += "  <option value='" + String(colorPair[0]) + "'";
+      if (String(colorPair[0]).equalsIgnoreCase(selectedValue)) {
+          html += " selected";
+      }
+      html += ">" + String(colorPair[1]) + "</option>\n";
+  }
+  html += "</select>\n";
+  return html;
+}
+
+
 //+=============================================================================
 // Hilfsfunktion zum Generieren des Type-Dropdowns
 //+=============================================================================
@@ -1349,15 +1377,21 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label' value='" + String(buttonData.name) + "' required></div>\n");
   response->print("            </div>\n");
 
-    // --- Layout Row ---
-    response->print("            <div class='form-group'>\n");
-    response->print("              <label for='" + prefix + "layoutRow' class='col-sm-2 control-label'>Layout Row</label>\n");
-    response->print("              <div class='col-sm-4'><input type='number' class='form-control' id='" + prefix + "layoutRow' name='" + prefix + "layoutRow' placeholder='Row (e.g., 0)' value='" + String(buttonData.layoutRow == -1 ? "" : String(buttonData.layoutRow)) + "' min='0'></div>\n");
-    // --- Layout Column ---
-    response->print("              <label for='" + prefix + "layoutCol' class='col-sm-2 control-label'>Layout Column</label>\n");
-    response->print("              <div class='col-sm-4'><input type='number' class='form-control' id='" + prefix + "layoutCol' name='" + prefix + "layoutCol' placeholder='Column (e.g., 0)' value='" + String(buttonData.layoutCol == -1 ? "" : String(buttonData.layoutCol)) + "' min='0'></div>\n");
-    response->print("              <span class='help-block col-sm-offset-2 col-sm-10'>Optional: Specify row/column for grid layout (starting from 0). Leave blank for default flow.</span>\n");
-    response->print("            </div>\n");
+  // --- Layout Row ---
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='" + prefix + "layoutRow' class='col-sm-2 control-label'>Layout Row</label>\n");
+  response->print("              <div class='col-sm-4'><input type='number' class='form-control' id='" + prefix + "layoutRow' name='" + prefix + "layoutRow' placeholder='Row (e.g., 0)' value='" + String(buttonData.layoutRow == -1 ? "" : String(buttonData.layoutRow)) + "' min='0'></div>\n");
+  // --- Layout Column ---
+  response->print("              <label for='" + prefix + "layoutCol' class='col-sm-2 control-label'>Layout Column</label>\n");
+  response->print("              <div class='col-sm-4'><input type='number' class='form-control' id='" + prefix + "layoutCol' name='" + prefix + "layoutCol' placeholder='Column (e.g., 0)' value='" + String(buttonData.layoutCol == -1 ? "" : String(buttonData.layoutCol)) + "' min='0'></div>\n");
+  response->print("              <span class='help-block col-sm-offset-2 col-sm-10'>Optional: Specify row/column for grid layout (starting from 0). Leave blank for default flow.</span>\n");
+  response->print("            </div>\n");
+
+      // --- Button Color ---
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='" + prefix + "colorClass' class='col-sm-2 control-label'>Button Color</label>\n");
+  response->print("              <div class='col-sm-10'>" + generateColorDropdownHtml(prefix + "colorClass", String(buttonData.colorClass)) + "</div>\n");
+  response->print("            </div>\n");
 
   // --- Button Type Selector (Radios) ---
   response->print("            <div class='form-group'>\n");
@@ -1600,6 +1634,7 @@ void handleSaveButton(AsyncWebServerRequest *request) {
   String macroJson = "";
   String layoutRowStr = "";
   String layoutColStr = "";
+  String colorClassStr = ""; // Für die Farbklasse
   bool buttonIdFound = false;
 
   for(int i=0; i<params; i++){
@@ -1637,6 +1672,8 @@ void handleSaveButton(AsyncWebServerRequest *request) {
         layoutRowStr = paramValue;
       } else if (paramName.equals("btn_layoutCol")) {
         layoutColStr = paramValue;
+      } else if (paramName.equals("btn_colorClass")) {
+        colorClassStr = paramValue;
       }
     } else {
        Serial.printf("      Ignoring non-POST param[%s]: %s\n", p->name().c_str(), p->value().c_str());
@@ -1679,6 +1716,7 @@ void handleSaveButton(AsyncWebServerRequest *request) {
   Serial.println("outStr: " + outStr);
   Serial.println("layoutRowStr: " + layoutRowStr + " -> " + String(layoutRow));
   Serial.println("layoutColStr: " + layoutColStr + " -> " + String(layoutCol));
+  Serial.println("colorClassStr: " + colorClassStr);
   Serial.println("------------------------");
 
   // --- Validierung ---
@@ -1731,6 +1769,24 @@ if (isMacro) {
       macroJson = ""; // Setze hier schon Leerwert
       Serial.println("    Single IR validation passed.");
   }
+
+  // --- Farbklasse validieren ---
+  const char* validColors[] = {"btn-primary", "btn-success", "btn-info", "btn-warning", "btn-danger", "btn-default"};
+  bool colorIsValid = false;
+  for (const char* validColor : validColors) {
+      if (colorClassStr.equalsIgnoreCase(validColor)) {
+          colorClassStr = validColor; // Stelle korrekte Schreibweise sicher
+          colorIsValid = true;
+          break;
+      }
+  }
+  if (!colorIsValid) {
+      Serial.println("    Warning: Invalid color class received ('" + colorClassStr + "'). Defaulting to btn-primary.");
+      colorClassStr = "btn-primary"; // Fallback auf Default
+  }
+  // --- Ende Farbklasse validieren ---
+
+  
   // --- ENDE VALIDIERUNG ---
 
   // Defaults setzen (redundant, da oben schon erledigt, aber schadet nicht)
@@ -1747,6 +1803,9 @@ if (isMacro) {
  tempButton.isMacro = isMacro;
  tempButton.layoutRow = layoutRow;
  tempButton.layoutCol = layoutCol;
+ strncpy(tempButton.colorClass, colorClassStr.c_str(), sizeof(tempButton.colorClass) - 1);
+ tempButton.colorClass[sizeof(tempButton.colorClass) - 1] = '\0';
+
 
  // Modus-spezifische Felder
  if (isMacro) {
@@ -2915,11 +2974,11 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   response->print("          </ul><hr>");
   // --- ENDE Backup/Restore Sektion ---
 
-  // --- ANZEIGE DER AKTUELLEN BUTTONS (KORRIGIERT) ---
+  // --- ANZEIGE DER BUTTONS ---
   response->print("          <h2>Current Active Buttons</h2>\n");
   response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n");
-  // --- KORRIGIERTER Tabellenkopf ---
-  response->print("            <thead><tr><th>ID</th><th>Name</th><th>Row</th><th>Col</th><th>Type</th><th>Data/Macro Preview</th><th>Mode</th><th>Actions</th></tr></thead>\n");
+  // --- Tabellenkopf ---
+  response->print("            <thead><tr><th>ID</th><th>Name</th><th>Row</th><th>Col</th><th>Color</th><th>Type</th><th>Data/Macro Preview</th><th>Mode</th><th>Actions</th></tr></thead>\n"); // <-- NEUE SPALTE: Color
   response->print("            <tbody>\n");
 
   if (!buttonConfigs.empty()) {
@@ -2935,6 +2994,8 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
       response->print("                <td>" + String(button.name) + "</td>\n"); // Name
       response->print("                <td>" + String(button.layoutRow) + "</td>\n"); // Row
       response->print("                <td>" + String(button.layoutCol) + "</td>\n"); // Col
+      response->print("                <td><span class='label " + String(button.colorClass) + "'>" + String(button.colorClass) + "</span></td>\n"); // Zeigt Klasse mit Farb-Badge
+
 
       // Conditional columns based on mode
       if (button.isMacro) {
@@ -2964,8 +3025,8 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
       yield(); // Wichtig bei vielen Buttons
     }
   } else {
-    // --- KORRIGIERTER colspan ---
-    response->print("              <tr><td colspan='8' class='text-center'><em>No active buttons configured.</em></td></tr>\n"); // 8 Spalten
+    // --- colspan ---
+    response->print("              <tr><td colspan='9' class='text-center'><em>No active buttons configured.</em></td></tr>\n"); // 9 Spalten jetzt
   }
 
   response->print("            </tbody>\n");
@@ -3497,7 +3558,7 @@ if (maxRow >= 0 && maxCol >= 0) {
                 const ButtonConfig& button = *btnPtr; // Dereferenzieren
                 String buttonId = "btn_" + String(std::distance(buttonConfigs.data(), btnPtr)); // Index im Originalvektor finden
 
-                String buttonHtml = "<button id='" + buttonId + "' class='btn btn-primary btn-lg remote-button' style='margin: 2px;' "; // Kleinere Margin im Grid
+                String buttonHtml = "<button id='" + buttonId + "' class='btn " + String(button.colorClass) + " btn-lg remote-button' style='margin: 2px;' "; // <-- HIER ANPASSEN
                 buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
                 if (!button.isMacro) {
                     buttonHtml += "data-type='" + String(button.type) + "' ";
@@ -3534,7 +3595,7 @@ if (!buttonsWithoutLayout.empty()) {
         String buttonId = "btn_" + String(std::distance(buttonConfigs.data(), btnPtr));
 
         // Button HTML (wie oben, aber mit Standard-Margin)
-        String buttonHtml = "<button id='" + buttonId + "' class='btn btn-primary btn-lg remote-button' style='margin: 5px;' ";
+        String buttonHtml = "<button id='" + buttonId + "' class='btn " + String(button.colorClass) + " btn-lg remote-button' style='margin: 5px;' "; // <-- HIER ANPASSEN
         buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
         if (!button.isMacro) {
             buttonHtml += "data-type='" + String(button.type) + "' ";
