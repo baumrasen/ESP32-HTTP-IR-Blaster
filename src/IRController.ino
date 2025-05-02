@@ -140,6 +140,86 @@ struct ButtonConfig {
 std::vector<ButtonConfig> buttonConfigs;
 //+=============================================================================
 
+
+// +++ HILFSFUNKTION ZUR NORMALISIERUNG (bleibt gleich) +++
+String normalizeHex(String hexStr) {
+  hexStr.trim(); // Entferne Leerzeichen am Anfang/Ende
+  if (hexStr.startsWith("0x")) {
+    hexStr = hexStr.substring(2); // Entferne "0x"
+  }
+  hexStr.toUpperCase(); // Alles groß schreiben
+  return hexStr;
+}
+
+// +++ KORRIGIERTE findMatchingButtonName (mit numerischem Adressvergleich) +++
+String findMatchingButtonName(const Code& codeToMatch) {
+  if (!codeToMatch.valid || strlen(codeToMatch.encoding) == 0 || strlen(codeToMatch.data) == 0 || codeToMatch.bits <= 0) {
+      return "";
+  }
+
+  String codeTypeLower = String(codeToMatch.encoding);
+  codeTypeLower.toLowerCase();
+  String normCodeData = normalizeHex(String(codeToMatch.data));
+  String normCodeAddressStr = normalizeHex(String(codeToMatch.address)); // Adresse als String
+
+  // --- DEBUGGING: Gib die normalisierten Werte aus ---
+  // Serial.printf("  Matching against: Type=%s, Data=%s, Bits=%d, AddressStr=%s\n",
+  //               codeTypeLower.c_str(), normCodeData.c_str(), codeToMatch.bits, normCodeAddressStr.c_str());
+  // --- ENDE DEBUGGING ---
+
+  for (const auto& button : buttonConfigs) {
+      if (!button.configured || button.isMacro) {
+          continue;
+      }
+
+      String buttonTypeLower = String(button.type);
+      buttonTypeLower.toLowerCase();
+      String normButtonData = normalizeHex(String(button.data));
+      String normButtonAddressStr = normalizeHex(String(button.address)); // Adresse als String
+
+      // --- DEBUGGING: Gib die normalisierten Button-Werte aus ---
+      // Serial.printf("    Comparing with Button '%s': Type=%s, Data=%s, Len=%d, AddressStr=%s\n",
+      //               button.name, buttonTypeLower.c_str(), normButtonData.c_str(), button.length, normButtonAddressStr.c_str());
+      // --- ENDE DEBUGGING ---
+
+      // --- Kernvergleich (Typ, Daten, Länge) ---
+      if (codeTypeLower == buttonTypeLower &&
+          normCodeData == normButtonData &&
+          codeToMatch.bits == button.length) {
+
+          // --- KORRIGIERTER Adress-Vergleich (numerisch) ---
+          bool addressMatch = true;
+          // Wandle normalisierte Adress-Strings in Zahlen um (Basis 16)
+          // Wichtig: strtoul gibt 0 zurück, wenn der String leer ist oder ungültig. Das passt für uns.
+          unsigned long codeAddrNum = strtoul(normCodeAddressStr.c_str(), NULL, 16);
+          unsigned long buttonAddrNum = strtoul(normButtonAddressStr.c_str(), NULL, 16);
+
+          // Serial.printf("      Address Check: CodeNum=%lu, ButtonNum=%lu\n", codeAddrNum, buttonAddrNum); // Debug
+
+          // Vergleiche die numerischen Werte
+          if (buttonAddrNum != 0) { // Nur wenn der Button eine Adresse != 0 hat...
+              if (codeAddrNum != buttonAddrNum) { // ...muss die Code-Adresse exakt übereinstimmen.
+                  addressMatch = false;
+                  // Serial.println("      Address mismatch (Button requires specific address)!"); // Debug
+              }
+          }
+          // Wenn buttonAddrNum == 0 ist, ist addressMatch standardmäßig true (wir ignorieren die Adresse)
+          // --- ENDE KORRIGIERTER Adress-Vergleich ---
+
+          if (addressMatch) {
+              Serial.printf("      MATCH FOUND! Button: %s\n", button.name); // Debug
+              return String(button.name); // Treffer gefunden!
+          } else {
+              // Serial.println("      Address mismatch prevented match."); // Debug
+          }
+      } // Ende Kernvergleich
+  } // Ende for-Schleife
+
+  // Serial.println("  No match found for this code."); // Debug
+  return ""; // Kein passender Button gefunden
+}
+
+
 // Funktion: Speichert die aktuelle Konfiguration in eine spezifische Datei
 bool saveConfigToFile(const char* filePath) {
   Serial.printf("==> saveConfigToFile: Saving current config to '%s'\n", filePath);
@@ -396,19 +476,20 @@ void updateButtonMacroJsStore() {
 
 // --- Hilfsfunktion zum Senden von Code-Updates als SSE ---
 void sendCodeUpdateEvent(const char* eventName, const Code& code) {
-  if (events != nullptr && events->count() > 0) { // <-- Prüfen, ob diese Zeile aktiv ist
-    DynamicJsonDocument jsonDoc(512); // Ausreichend für ein Code-Objekt
+  if (events != nullptr && events->count() > 0) {
+    DynamicJsonDocument jsonDoc(512); // Ggf. Größe leicht erhöhen
     jsonDoc["encoding"] = code.encoding;
     jsonDoc["data"] = code.data;
     jsonDoc["bits"] = code.bits;
     jsonDoc["address"] = code.address;
-    jsonDoc["repeat"] = code.repeat; // Wiederholungen hinzufügen
-    jsonDoc["out"] = code.out;       // Output hinzufügen
-    jsonDoc["timestamp"] = epochToString(code.timestamp); // Zeit als String
+    jsonDoc["repeat"] = code.repeat;
+    jsonDoc["out"] = code.out;
+    jsonDoc["timestamp"] = epochToString(code.timestamp);
+    jsonDoc["matchedButton"] = findMatchingButtonName(code);
 
     String jsonString;
     serializeJson(jsonDoc, jsonString);
-    events->send(jsonString.c_str(), eventName, millis()); // <-- Prüfen, ob diese Zeile aktiv ist
+    events->send(jsonString.c_str(), eventName, millis());
   }
 }
 
@@ -952,28 +1033,57 @@ void generateAndWriteJavaScript() {
   newJsContent += F("console.log('Setting up EventSource...');\n");
   newJsContent += F("const evtSource = new EventSource('/events');\n");
   newJsContent += F("const MAX_TABLE_ROWS = 5;\n");
+  
   newJsContent += F("function addTableRow(tableBodyId, codeData, isSentTable) {\n");
   newJsContent += F("  const tableBody = document.getElementById(tableBodyId);\n");
   newJsContent += F("  if (!tableBody) return;\n");
+  newJsContent += F("\n");
+  newJsContent += F("  // Platzhalter entfernen\n");
   newJsContent += F("  const placeholderId = isSentTable ? 'no-sent-codes' : 'no-received-codes';\n");
   newJsContent += F("  const placeholderRow = document.getElementById(placeholderId);\n");
   newJsContent += F("  if (placeholderRow) placeholderRow.remove();\n");
+  newJsContent += F("\n");
+  newJsContent += F("  // Neue Zeile erstellen\n");
   newJsContent += F("  let newRowHtml = `<tr class='text-uppercase'>`;\n");
   newJsContent += F("  newRowHtml += `<td>${codeData.timestamp}</td>`;\n");
   newJsContent += F("  newRowHtml += `<td><code>${codeData.data}</code></td>`;\n");
   newJsContent += F("  newRowHtml += `<td><code>${codeData.encoding}</code></td>`;\n");
   newJsContent += F("  newRowHtml += `<td><code>${codeData.bits}</code></td>`;\n");
   newJsContent += F("  newRowHtml += `<td><code>${codeData.address || '-'}</code></td>`;\n");
+  newJsContent += F("\n");
+  newJsContent += F("  // Zusätzliche Spalten für 'Sent' Tabelle\n");
   newJsContent += F("  if (isSentTable) {\n");
   newJsContent += F("    newRowHtml += `<td><code>${codeData.repeat}</code></td>`;\n");
   newJsContent += F("    newRowHtml += `<td><code>${codeData.out}</code></td>`;\n");
   newJsContent += F("  }\n");
-  newJsContent += F("  newRowHtml += `</tr>`;\n");
-  newJsContent += F("  tableBody.insertAdjacentHTML('afterbegin', newRowHtml);\n");
-  newJsContent += F("  while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
-  newJsContent += F("    tableBody.deleteRow(-1);\n");
+  newJsContent += F("\n");
+  newJsContent += F("  // +++ ZELLE FÜR BUTTON MATCH +++\n");
+  newJsContent += F("  let matchCell = '<td>-</td>'; // Default: Kein Match\n");
+  newJsContent += F("  if (codeData.matchedButton && codeData.matchedButton.length > 0) {\n");
+  newJsContent += F("      matchCell = `<td><span class='label label-info'>${codeData.matchedButton}</span></td>`;\n");
   newJsContent += F("  }\n");
-  newJsContent += F("}\n");
+  newJsContent += F("  newRowHtml += matchCell; // Füge die Match-Zelle hinzu\n");
+  newJsContent += F("  // +++ ENDE ZELLE +++\n");
+  newJsContent += F("\n");
+  newJsContent += F("  newRowHtml += `</tr>`;\n");
+  newJsContent += F("\n");
+  newJsContent += F("  // Zeile am Anfang einfügen\n");
+  newJsContent += F("  tableBody.insertAdjacentHTML('afterbegin', newRowHtml);\n");
+  newJsContent += F("\n");
+  newJsContent += F("  // Alte Zeilen entfernen, wenn Limit überschritten\n");
+  newJsContent += F("  while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
+  newJsContent += F("    tableBody.deleteRow(-1); // Letzte Zeile löschen\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("\n");
+  newJsContent += F("  // --- WICHTIG: Colspan im Platzhalter anpassen (falls er neu erstellt werden müsste) ---\n");
+  newJsContent += F("  // Diese Logik wird hier nicht direkt benötigt, aber wenn du Code hättest,\n");
+  newJsContent += F("  // der den Platzhalter wieder einfügt, müsstest du den colspan anpassen:\n");
+  newJsContent += F("  // const expectedColspan = isSentTable ? 8 : 6; // Anzahl Spalten\n");
+  newJsContent += F("  // if (tableBody.rows.length === 0) {\n");
+  newJsContent += F("  //    tableBody.innerHTML = `<tr id=\"${placeholderId}\"><td colspan=\"${expectedColspan}\" class=\"text-center\"><em>...</em></td></tr>`;\n");
+  newJsContent += F("  // }\n");
+  newJsContent += F("}\n"); // Ende der addTableRow Funktion
+  
   newJsContent += F("evtSource.addEventListener('codeSent', function(event) {\n");
   newJsContent += F("  console.log('SSE codeSent:', event.data);\n");
   newJsContent += F("  try { const codeData = JSON.parse(event.data); addTableRow('sent-codes-body', codeData, true); } catch (e) { console.error('Error parsing codeSent data:', e); }\n");
@@ -2896,6 +3006,51 @@ void sendHeader(AsyncResponseStream *response) {
 //+=============================================================================
 // Send footer HTML (AsyncResponseStream Version)
 void sendFooter(AsyncResponseStream *response) {
+
+     // +++ STRUKTUR: Device Info und Pin Config nebeneinander +++
+   response->print("      <div class='row'>\n"); // <-- Eine gemeinsame äußere Reihe für beide Blöcke
+
+   // --- Spalte 1: Device Information ---
+   response->print("        <div class='col-md-6'>\n"); // <-- Spalte 1 (Hälfte der Breite auf md+)
+   response->print("          <h3>Device Information</h3>\n");
+   response->print("          <ul class='list-unstyled'>\n");
+
+   // Hostname Info
+   String hostInfo = "            <li><strong>Hostname:</strong> <a href='http://" + String(host_name) + ".local" + ":" + String(port_str) + "'>" + String(host_name) + ".local" + ":" + String(port_str) + "</a></li>\n";
+   response->print(hostInfo);
+
+   // Local IP Info
+   String localInfo = "            <li><strong>Local IP:</strong> <a href='http://" + WiFi.localIP().toString() + ":" + String(port_str) + "'>" + WiFi.localIP().toString() + ":" + String(port_str) + "</a></li>\n";
+   response->print(localInfo);
+
+   // DNS IP Info
+   String dnsInfo = "            <li><strong>DNS IP:</strong> <a href='http://" + WiFi.dnsIP().toString() + "'>" + WiFi.dnsIP().toString() + "</a></li>\n";
+   response->print(dnsInfo);
+
+   // MAC Address Info
+   String macInfo = "            <li><strong>MAC Address:</strong> <code>" + String(WiFi.macAddress()) + "</code></li>\n";
+   response->print(macInfo);
+
+   response->print("          </ul>\n");
+   response->print("        </div>\n"); // <-- Ende Spalte 1 (col-md-6)
+
+   // --- Spalte 2: Pin Configuration ---
+   response->print("        <div class='col-md-6'>\n"); // <-- Spalte 2 (Hälfte der Breite auf md+)
+   response->print("          <h3>Pin Configuration</h3>\n");
+   response->print("          <ul class='list-unstyled'>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pinr1) + "</span> Receiving </li>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pins1) + "</span> Transmitter 1 </li>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pins2) + "</span> Transmitter 2 </li>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pins3) + "</span> Transmitter 3 </li>\n");
+   response->print("            <li><span class='badge'>GPIO " + String(pins4) + "</span> Transmitter 4 </li></ul>\n");
+   response->print("        </div>\n"); // <-- Ende Spalte 2 (col-md-6)
+
+    response->print("      </div>\n"); // <-- Ende der gemeinsamen äußeren Reihe
+    response->print("      <hr />\n"); // <-- Trennlinie NACH der Reihe
+
+    // +++ ENDE STRUKTUR +++
+
+    yield();
 // --- Uptime and Epoch ---
   // OLD Line that calls now():
   // String uptimeEpochLine = "      <div class='row'><div class='col-md-12'><em>" + String(millis()) + "ms uptime; EPOCH " + String(now() - (timeZone * SECS_PER_HOUR)) + "</em> / <em id='jepoch'></em> ( <em id='jdiff'></em> )</div></div>\n";
@@ -3355,14 +3510,20 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("        <div class='col-md-12'>\n");
   response->print("          <h3>Codes Transmitted</h3>\n");
   response->print("          <table class='table table-striped' style='table-layout: fixed;'>\n");
-  response->print("            <thead><tr><th>Sent</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th></tr></thead>\n");
+  response->print("            <thead><tr><th>Sent</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Button Match</th></tr></thead>\n");
   response->print("            <tbody id='sent-codes-body'>\n");
   auto generateSentRow = [&](const Code& code) {
       if (code.valid) {
-          String rowHtml = "              <tr class='text-uppercase'><td>" + epochToString(code.timestamp) + "</td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td><td><code>" + String(code.repeat) + "</code></td><td><code>" + String(code.out) + "</code></td></tr>\n";
+          String matchedButtonName = findMatchingButtonName(code);
+          String matchCell = "-";
+          if (!matchedButtonName.isEmpty()) {
+              matchCell = "<span class='label label-info'>" + matchedButtonName + "</span>";
+          }
+          String rowHtml = "              <tr class='text-uppercase'><td>" + epochToString(code.timestamp) + "</td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td><td><code>" + String(code.repeat) + "</code></td><td><code>" + String(code.out) + "</code></td><td>" + matchCell + "</td></tr>\n";
           response->print(rowHtml);
       }
   };
+
   generateSentRow(last_send);
   yield();
   generateSentRow(last_send_2);
@@ -3379,7 +3540,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 
   // Platzhalterzeile mit ID versehen
   if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
-  response->print("              <tr id='no-sent-codes'><td colspan='7' class='text-center'><em>No codes sent</em></td></tr>");
+  response->print("              <tr id='no-sent-codes'><td colspan='8' class='text-center'><em>No codes sent</em></td></tr>"); // <-- colspan="8"
   response->print("            </tbody></table>\n");
   response->print("          </div></div>\n");
 
@@ -3390,12 +3551,16 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("        <div class='col-md-12'>\n");
   response->print("          <h3>Codes Received</h3>\n");
   response->print("          <table class='table table-striped' style='table-layout: fixed;'>\n");
-  response->print("            <thead><tr><th>Received</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th></tr></thead>\n");
+  response->print("            <thead><tr><th>Received</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th><th>Button Match</th></tr></thead>\n");
   response->print("            <tbody id='received-codes-body'>\n");
-  response->print("            <tbody>\n");
   auto generateReceivedRow = [&](const Code& code, int id) {
       if (code.valid) {
-          String rowHtml = "              <tr class='text-uppercase'><td><a href='/received?id=" + String(id) + "'>" + epochToString(code.timestamp) + "</a></td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td></tr>\n";
+          String matchedButtonName = findMatchingButtonName(code);
+          String matchCell = "-";
+          if (!matchedButtonName.isEmpty()) {
+              matchCell = "<span class='label label-info'>" + matchedButtonName + "</span>";
+          }
+          String rowHtml = "              <tr class='text-uppercase'><td><a href='/received?id=" + String(id) + "'>" + epochToString(code.timestamp) + "</a></td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td><td>" + matchCell + "</td></tr>\n";
           response->print(rowHtml);
       }
   };
@@ -3412,7 +3577,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 
   // Platzhalterzeile mit ID versehen
   if (!last_recv.valid && !last_recv_2.valid && !last_recv_3.valid && !last_recv_4.valid && !last_recv_5.valid)
-  response->print("              <tr id='no-received-codes'><td colspan='5' class='text-center'><em>No codes received</em></td></tr>");
+  response->print("              <tr id='no-received-codes'><td colspan='6' class='text-center'><em>No codes received</em></td></tr>"); // <-- colspan="6"
   response->print("            </tbody></table>\n");
   response->print("          </div></div><hr />\n");
   
@@ -3493,51 +3658,6 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   // +++ ENDE FORMULAR +++
 
   yield(); // Keep the existing yield after the Received table
-
-   // +++ NEUE STRUKTUR: Device Info und Pin Config nebeneinander +++
-   response->print("      <div class='row'>\n"); // <-- Eine gemeinsame äußere Reihe für beide Blöcke
-
-   // --- Spalte 1: Device Information ---
-   response->print("        <div class='col-md-6'>\n"); // <-- Spalte 1 (Hälfte der Breite auf md+)
-   response->print("          <h3>Device Information</h3>\n");
-   response->print("          <ul class='list-unstyled'>\n");
-
-   // Hostname Info
-   String hostInfo = "            <li><strong>Hostname:</strong> <a href='http://" + String(host_name) + ".local" + ":" + String(port_str) + "'>" + String(host_name) + ".local" + ":" + String(port_str) + "</a></li>\n";
-   response->print(hostInfo);
-
-   // Local IP Info
-   String localInfo = "            <li><strong>Local IP:</strong> <a href='http://" + WiFi.localIP().toString() + ":" + String(port_str) + "'>" + WiFi.localIP().toString() + ":" + String(port_str) + "</a></li>\n";
-   response->print(localInfo);
-
-   // DNS IP Info
-   String dnsInfo = "            <li><strong>DNS IP:</strong> <a href='http://" + WiFi.dnsIP().toString() + "'>" + WiFi.dnsIP().toString() + "</a></li>\n";
-   response->print(dnsInfo);
-
-   // MAC Address Info
-   String macInfo = "            <li><strong>MAC Address:</strong> <code>" + String(WiFi.macAddress()) + "</code></li>\n";
-   response->print(macInfo);
-
-   response->print("          </ul>\n");
-   response->print("        </div>\n"); // <-- Ende Spalte 1 (col-md-6)
-
-   // --- Spalte 2: Pin Configuration ---
-   response->print("        <div class='col-md-6'>\n"); // <-- Spalte 2 (Hälfte der Breite auf md+)
-   response->print("          <h3>Pin Configuration</h3>\n");
-   response->print("          <ul class='list-unstyled'>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pinr1) + "</span> Receiving </li>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pins1) + "</span> Transmitter 1 </li>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pins2) + "</span> Transmitter 2 </li>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pins3) + "</span> Transmitter 3 </li>\n");
-   response->print("            <li><span class='badge'>GPIO " + String(pins4) + "</span> Transmitter 4 </li></ul>\n");
-   response->print("        </div>\n"); // <-- Ende Spalte 2 (col-md-6)
-
- response->print("      </div>\n"); // <-- Ende der gemeinsamen äußeren Reihe
- response->print("      <hr />\n"); // <-- Trennlinie NACH der Reihe
-
- // +++ ENDE NEUE STRUKTUR +++
-
-  yield();
 
   // --- Schreibe Footer in den Stream ---
   sendFooter(response); // Übergibt den Stream
