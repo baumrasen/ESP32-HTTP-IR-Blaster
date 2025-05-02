@@ -140,6 +140,220 @@ struct ButtonConfig {
 std::vector<ButtonConfig> buttonConfigs;
 //+=============================================================================
 
+// Funktion: Speichert die aktuelle Konfiguration in eine spezifische Datei
+bool saveConfigToFile(const char* filePath) {
+  Serial.printf("==> saveConfigToFile: Saving current config to '%s'\n", filePath);
+
+  // Optional: Prüfen, ob das Root-Verzeichnis existiert
+  if (!LittleFS.exists("/")) {
+    Serial.println("    ERROR: LittleFS root directory not found (FS likely not mounted).");
+    return false;
+  }
+
+  // Stelle sicher, dass das Verzeichnis existiert (falls filePath einen Pfad enthält)
+  String pathStr = String(filePath);
+  int lastSlash = pathStr.lastIndexOf('/');
+  if (lastSlash > 0) {
+      String dirPath = pathStr.substring(0, lastSlash);
+      if (!LittleFS.exists(dirPath)) {
+          Serial.printf("    Directory '%s' does not exist. Creating...\n", dirPath.c_str());
+          if (!LittleFS.mkdir(dirPath)) {
+              Serial.println("    ERROR: Failed to create directory!");
+              return false;
+          }
+      }
+  }
+
+
+  DynamicJsonDocument jsonDoc(8192); // Größe ggf. erhöhen, falls viele große Makros
+  JsonArray buttonArray = jsonDoc.to<JsonArray>();
+
+  Serial.printf("    Serializing %d buttons...\n", buttonConfigs.size());
+  for (const auto& button : buttonConfigs) {
+     if (!button.configured) continue; // Nur konfigurierte speichern
+
+     JsonObject buttonJson = buttonArray.createNestedObject();
+     buttonJson["name"] = button.name;
+     buttonJson["configured"] = button.configured;
+     buttonJson["isMacro"] = button.isMacro;
+     if (button.isMacro) {
+        buttonJson["macroJson"] = button.macroJson;
+        buttonJson["type"] = ""; buttonJson["data"] = ""; buttonJson["length"] = 0;
+        buttonJson["address"] = ""; buttonJson["repeat"] = 1; buttonJson["out"] = 1;
+     } else {
+        buttonJson["type"] = button.type; buttonJson["data"] = button.data;
+        buttonJson["length"] = button.length; buttonJson["address"] = button.address;
+        buttonJson["repeat"] = button.repeat; buttonJson["out"] = button.out;
+        buttonJson["macroJson"] = "";
+     }
+  }
+
+  File configFile = LittleFS.open(filePath, "w");
+  if (!configFile) {
+    Serial.printf("    ERROR: Failed to open '%s' for writing!\n", filePath);
+    return false;
+  }
+  Serial.printf("    '%s' opened for writing.\n", filePath);
+
+  size_t bytesWritten = serializeJson(jsonDoc, configFile);
+  bool success = false;
+  if (bytesWritten == 0 && jsonDoc.size() > 0) {
+    Serial.printf("    ERROR: Failed to write to '%s' (serializeJson returned 0).\n", filePath);
+  } else {
+    Serial.printf("    %d bytes written to '%s'.\n", bytesWritten, filePath);
+    success = true;
+  }
+  configFile.close();
+  Serial.printf("<== saveConfigToFile: Leaving function for '%s'. Success: %d\n", filePath, success);
+  return success;
+}
+
+
+// Handler: Speichert die aktuelle Konfiguration als benanntes Backup
+void handleSaveNamedBackup(AsyncWebServerRequest *request) {
+  Serial.println("==> handleSaveNamedBackup: Entered function.");
+  if (!request->hasParam("backup_name", true)) { // true = check POST body
+    request->redirect("/buttons?status=error_missing_backup_name");
+    return;
+  }
+  String backupName = request->getParam("backup_name", true)->value();
+  backupName.trim();
+
+  if (backupName.length() == 0) {
+    request->redirect("/buttons?status=error_empty_backup_name");
+    return;
+  }
+
+  // --- Namen bereinigen (einfache Version) ---
+  String sanitizedName = "";
+  for (char c : backupName) {
+    if (isalnum(c) || c == '_' || c == '-') { // Erlaube Buchstaben, Zahlen, Unterstrich, Bindestrich
+      sanitizedName += c;
+    }
+  }
+  if (sanitizedName.length() == 0) { // Falls nach Bereinigung leer
+      request->redirect("/buttons?status=error_invalid_backup_name");
+      return;
+  }
+  // --- Ende Bereinigung ---
+
+  String filePath = "/backups/" + sanitizedName + ".json";
+
+  Serial.printf("    Attempting to save backup to: %s\n", filePath.c_str());
+
+  if (saveConfigToFile(filePath.c_str())) {
+    request->redirect("/buttons?status=backup_saved");
+  } else {
+    request->redirect("/buttons?status=error_backup_save");
+  }
+}
+
+
+// Handler: Lädt ein benanntes Backup und macht es zur aktiven Konfiguration
+void handleLoadNamedBackup(AsyncWebServerRequest *request) {
+  Serial.println("==> handleLoadNamedBackup: Entered function.");
+  if (!request->hasParam("name")) { // name kommt aus URL-Parameter
+    request->redirect("/buttons?status=error_missing_backup_name");
+    return;
+  }
+  String backupFilename = request->getParam("name")->value();
+
+  // Sicherheitscheck: Ist der Name plausibel? (z.B. keine Pfadtrenner)
+  if (backupFilename.indexOf('/') != -1 || backupFilename.indexOf('\\') != -1 || backupFilename == "." || backupFilename == "..") {
+      request->redirect("/buttons?status=error_invalid_backup_name");
+      return;
+  }
+
+  String backupFilePath = "/backups/" + backupFilename;
+  String activeFilePath = "/buttons.json";
+
+  Serial.printf("    Attempting to load backup from: %s\n", backupFilePath.c_str());
+
+  if (!LittleFS.exists(backupFilePath)) {
+    Serial.println("    ERROR: Backup file not found.");
+    request->redirect("/buttons?status=error_backup_not_found");
+    return;
+  }
+
+  // --- Datei kopieren (Backup -> Aktiv) ---
+  File sourceFile = LittleFS.open(backupFilePath, "r");
+  File destFile = LittleFS.open(activeFilePath, "w");
+
+  if (!sourceFile || !destFile) {
+    Serial.println("    ERROR: Failed to open source or destination file for copying.");
+    if (sourceFile) sourceFile.close();
+    if (destFile) destFile.close();
+    request->redirect("/buttons?status=error_backup_load");
+    return;
+  }
+
+  Serial.println("    Copying backup file to active configuration...");
+  size_t bufferSize = 512;
+  uint8_t buffer[bufferSize];
+  size_t bytesRead = 0;
+  size_t totalBytesCopied = 0;
+  while ((bytesRead = sourceFile.read(buffer, bufferSize)) > 0) {
+    size_t bytesWritten = destFile.write(buffer, bytesRead);
+    if (bytesWritten != bytesRead) {
+        Serial.println("    ERROR: Failed during file copy!");
+        sourceFile.close();
+        destFile.close();
+        request->redirect("/buttons?status=error_backup_load");
+        return;
+    }
+    totalBytesCopied += bytesWritten;
+    yield(); // Wichtig bei größeren Dateien
+  }
+
+  sourceFile.close();
+  destFile.close();
+  Serial.printf("    Successfully copied %d bytes.\n", totalBytesCopied);
+  // --- Ende Datei kopieren ---
+
+  // --- Konfiguration neu laden ---
+  Serial.println("    Reloading configuration from newly copied file...");
+  loadButtonConfig(); // Lädt /buttons.json neu in den buttonConfigs Vektor
+  // updateButtonMacroJsStore() wird innerhalb von loadButtonConfig aufgerufen
+
+  request->redirect("/buttons?status=backup_loaded");
+}
+
+
+// Handler: Löscht ein benanntes Backup
+void handleDeleteNamedBackup(AsyncWebServerRequest *request) {
+  Serial.println("==> handleDeleteNamedBackup: Entered function.");
+  if (!request->hasParam("name")) {
+    request->redirect("/buttons?status=error_missing_backup_name");
+    return;
+  }
+  String backupFilename = request->getParam("name")->value();
+
+  // Sicherheitscheck
+  if (backupFilename.indexOf('/') != -1 || backupFilename.indexOf('\\') != -1 || backupFilename == "." || backupFilename == "..") {
+      request->redirect("/buttons?status=error_invalid_backup_name");
+      return;
+  }
+
+  String filePath = "/backups/" + backupFilename;
+
+  Serial.printf("    Attempting to delete backup: %s\n", filePath.c_str());
+
+  if (!LittleFS.exists(filePath)) {
+    Serial.println("    ERROR: Backup file not found for deletion.");
+    request->redirect("/buttons?status=error_backup_not_found");
+    return;
+  }
+
+  if (LittleFS.remove(filePath)) {
+    Serial.println("    Backup deleted successfully.");
+    request->redirect("/buttons?status=backup_deleted");
+  } else {
+    Serial.println("    ERROR: Failed to delete backup file.");
+    request->redirect("/buttons?status=error_backup_delete");
+  }
+}
+
+
 // Function to update the JS store string (Optimized with reserve)
 // Version OHNE deserializeJson-Validierung
 void updateButtonMacroJsStore() {
@@ -289,70 +503,14 @@ void loadButtonConfig() {
 
 }
 
+
+// Die alte saveButtonConfig ruft jetzt die neue Funktion auf
 void saveButtonConfig() {
-
-  // Optional: Prüfen, ob das Root-Verzeichnis existiert
-  if (!LittleFS.exists("/")) {
-    Serial.println("        ERROR in saveButtonConfig: LittleFS root directory not found (FS likely not mounted).");
-    return; // Funktion verlassen
- }
-
-  DynamicJsonDocument jsonDoc(2048);
-  JsonArray buttonArray = jsonDoc.to<JsonArray>();
-
-  Serial.printf("        Serializing %d buttons...\n", buttonConfigs.size());
-  for (const auto& button : buttonConfigs) {
-     // Nur konfigurierte Buttons speichern (optional, aber sinnvoll)
-     if (!button.configured) continue;
-
-     Serial.println("          - Serializing: " + String(button.name));
-     JsonObject buttonJson = buttonArray.createNestedObject();
-     buttonJson["name"] = button.name;
-     buttonJson["configured"] = button.configured; // Oder immer true, wenn hier gespeichert
-
-     // --- Makro-Felder speichern ---
-     buttonJson["isMacro"] = button.isMacro;
-     if (button.isMacro) {
-      Serial.printf("      DEBUG saveButtonConfig: Saving macroJson for '%s': %s\n", button.name, button.macroJson); // NEU
-      buttonJson["macroJson"] = button.macroJson;
-        // Optional: Andere Felder auf null/default setzen, wenn Makro
-        buttonJson["type"] = "";
-        buttonJson["data"] = "";
-        buttonJson["length"] = 0;
-        buttonJson["address"] = "";
-        buttonJson["repeat"] = 1;
-        buttonJson["out"] = 1;
-     } else {
-        // Felder für einzelnen Befehl speichern
-        buttonJson["type"] = button.type;
-        buttonJson["data"] = button.data;
-        buttonJson["length"] = button.length;
-        buttonJson["address"] = button.address;
-        buttonJson["repeat"] = button.repeat;
-        buttonJson["out"] = button.out;
-        // Optional: MacroJson auf "" setzen
-        buttonJson["macroJson"] = "";
-     }
+  if (saveConfigToFile("/buttons.json")) {
+      updateButtonMacroJsStore(); // Nur JS Store aktualisieren, wenn die *aktive* Config gespeichert wurde
   }
-
-  File configFile = LittleFS.open("/buttons.json", "w");
-  if (!configFile) {
-    Serial.println("        ERROR: Failed to open buttons.json for writing!");
-    return;
-  }
-  Serial.println("        buttons.json opened for writing.");
-
-  size_t bytesWritten = serializeJson(jsonDoc, configFile);
-  if (bytesWritten == 0 && jsonDoc.size() > 0) { // Prüfe auch, ob Doc leer war
-    Serial.println("        ERROR: Failed to write to buttons.json (serializeJson returned 0).");
-  } else {
-    Serial.printf("        %d bytes written to buttons.json.\n", bytesWritten);
-    Serial.println("        Button config saved successfully.");
-  }
-  configFile.close();
-  Serial.println("    <== saveButtonConfig: Leaving function.");
-  updateButtonMacroJsStore();
 }
+
 
 //+=============================================================================
 // Reenable IR receiving
@@ -637,7 +795,7 @@ bool setupWifi(bool resetConf) {
   strncpy(port_str, custom_port, 6);
   port = atoi(port_str);
 
-  // --- NEUE PRÜFUNG ---
+  // --- PRÜFUNG ---
   port = atoi(port_str);
   if (port <= 0 || port > 65535) { // Prüft auf Fehler bei atoi() oder ungültigen Portbereich
       Serial.print("Warning: Invalid port '");
@@ -646,7 +804,7 @@ bool setupWifi(bool resetConf) {
       port = 80; // Setze auf Standardwert 80
       strcpy(port_str, "80"); // Korrigiere auch den String für Konsistenz
   }
-  // --- ENDE NEUE PRÜFUNG ---
+  // --- ENDE PRÜFUNG ---
   
   if (server != NULL) {
     delete server;
@@ -713,12 +871,12 @@ if (currentSize == 0 && wc > 0) { // written_chunk vom ersten print
 
 }
 
-// Füge diese neue Funktion irgendwo vor setup() ein
+
 // Überarbeitete Funktion zum Generieren und Schreiben von JavaScript
 void generateAndWriteJavaScript() {
   Serial.println("Checking/Generating JavaScript (/js/scripts.js)...");
 
-  // 1. Generiere den NEUEN JavaScript-Inhalt in einen String im RAM
+  // 1. Generiere den JavaScript-Inhalt in einen String im RAM
   String newJsContent;
   size_t estimatedSize = 8192; // Passe die Größe basierend auf der erwarteten JS-Größe an
   if (!newJsContent.reserve(estimatedSize)) {
@@ -980,7 +1138,7 @@ void generateAndWriteJavaScript() {
       return; // Abbrechen bei Fehler
     }
 
-    // Schreibe den gesamten neuen Inhalt
+    // Schreibe den gesamten Inhalt
     size_t bytesWritten = jsFile.print(newJsContent);
     int writeError = jsFile.getWriteError(); // Fehlerstatus holen
     jsFile.close(); // Datei schließen
@@ -1396,7 +1554,7 @@ if (isMacro) {
   // Validierung für Makro
   if (macroJson.length() == 0) {
       Serial.println("    ERROR: Validation failed! (Macro JSON missing). Redirecting.");
-      request->redirect("/buttons?status=error_invalid_macro_data"); // Neuer Status für Makro-Fehler
+      request->redirect("/buttons?status=error_invalid_macro_data"); // Status für Makro-Fehler
       return;
   }
   // JSON Validierung (wie gehabt)
@@ -2360,18 +2518,21 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   // Der zweite Handler (handleRestoreUpload) wird während des Uploads für jeden Datenchunk aufgerufen.
   server->on("/restore", HTTP_POST, handleRestoreRequest, handleRestoreUpload);
 
-    // --- BUTTON HANDLER ---
-    server->on("/buttons", HTTP_GET, handleButtonConfigPage);      // Zeigt die Übersicht
-    server->on("/addbutton", HTTP_GET, handleAddButtonPage);       // Zeigt leeres Formular
-    server->on("/editbutton", HTTP_GET, handleEditButtonPage);     // Zeigt befülltes Formular
-    server->on("/deletebutton", HTTP_GET, handleDeleteButton);   // Löscht Button (GET für Einfachheit, POST wäre besser)
-    server->on("/savebutton", HTTP_POST, handleSaveButton);
-    server->on("/sendbutton", HTTP_GET, handleSendButton);
-    server->on("/sendir", HTTP_POST, handleSendIr);
+  server->on("/savebackup", HTTP_POST, handleSaveNamedBackup);
+  server->on("/loadbackup", HTTP_GET, handleLoadNamedBackup);
+  server->on("/deletebackup", HTTP_GET, handleDeleteNamedBackup);
 
-    server->begin();
+  // --- BUTTON HANDLER ---
+  server->on("/buttons", HTTP_GET, handleButtonConfigPage);      // Zeigt die Übersicht
+  server->on("/addbutton", HTTP_GET, handleAddButtonPage);       // Zeigt leeres Formular
+  server->on("/editbutton", HTTP_GET, handleEditButtonPage);     // Zeigt befülltes Formular
+  server->on("/deletebutton", HTTP_GET, handleDeleteButton);   // Löscht Button (GET für Einfachheit, POST wäre besser)
+  server->on("/savebutton", HTTP_POST, handleSaveButton);
+  server->on("/sendbutton", HTTP_GET, handleSendButton);
+  server->on("/sendir", HTTP_POST, handleSendIr);
+
+  server->begin();
   Serial.println("HTTP Server started on port " + String(port));
-
 
   irsend1.begin();
   irsend2.begin();
@@ -2527,53 +2688,100 @@ void fullCode (decode_results *results)
 void sendButtonConfigPage(AsyncWebServerRequest *request) {
   Serial.println("Connection received endpoint '/buttons' (GET)");
 
-  // --- Startet den Response Stream ---
   AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", 200);
-  sendHeader(response); // Sendet den HTML-Header
+  sendHeader(response);
 
   response->print("      <div class='row'>\n");
   response->print("        <div class='col-md-12'>\n");
-  // response->print("          <h2>Configure Remote Buttons</h2>\n"); // Titel ist schon im Header? Ggf. anpassen
 
-  // --- Feedback-Meldungen anzeigen (z.B. nach Speichern/Löschen) ---
+  // --- Feedback-Meldungen anzeigen (ERWEITERT) ---
   if (request->hasParam("status")) {
       String status = request->getParam("status")->value();
-      if (status == "saved") {
-          response->print("<div class='alert alert-success'>Button saved successfully.</div>");
-      } else if (status == "deleted") {
-          response->print("<div class='alert alert-success'>Button deleted successfully.</div>");
-      } else if (status == "error_invalid_id") {
-          response->print("<div class='alert alert-danger'>Error: Invalid button ID specified.</div>");
-      } else if (status == "error_invalid_data") {
-          response->print("<div class='alert alert-danger'>Error: Invalid data submitted for button.</div>");
-      } else if (status == "error_save") {
-          response->print("<div class='alert alert-danger'>Error: Could not save button configuration.</div>");
-      } else if (status == "error_max_buttons") {
-          response->print("<div class='alert alert-warning'>Warning: Maximum number of buttons reached. Could not add new button.</div>");
-      } else if (status == "error_invalid_json") {
-          response->print("<div class='alert alert-danger'>Error: Invalid JSON format in Macro field.</div>");
-      } else if (status == "error_json_not_array") {
-          response->print("<div class='alert alert-danger'>Error: Macro JSON must be a valid JSON array.</div>");
-      }
-      // ggf. weitere Statusmeldungen hinzu (z.B. für Restore)
+      // Bestehende Status...
+      if (status == "saved") response->print("<div class='alert alert-success'>Button saved successfully.</div>");
+      else if (status == "deleted") response->print("<div class='alert alert-success'>Button deleted successfully.</div>");
+      // ... andere bestehende Fehler ...
+      // Status für Backup/Restore
+      else if (status == "backup_saved") response->print("<div class='alert alert-success'>Configuration backup saved successfully.</div>");
+      else if (status == "backup_loaded") response->print("<div class='alert alert-success'>Configuration restored successfully from backup.</div>");
+      else if (status == "backup_deleted") response->print("<div class='alert alert-success'>Configuration backup deleted successfully.</div>");
+      else if (status == "error_missing_backup_name") response->print("<div class='alert alert-danger'>Error: Backup name was missing.</div>");
+      else if (status == "error_empty_backup_name") response->print("<div class='alert alert-danger'>Error: Backup name cannot be empty.</div>");
+      else if (status == "error_invalid_backup_name") response->print("<div class='alert alert-danger'>Error: Invalid characters in backup name. Use only letters, numbers, underscore, or hyphen.</div>");
+      else if (status == "error_backup_save") response->print("<div class='alert alert-danger'>Error: Could not save configuration backup. Check logs.</div>");
+      else if (status == "error_backup_not_found") response->print("<div class='alert alert-danger'>Error: Specified backup file not found.</div>");
+      else if (status == "error_backup_load") response->print("<div class='alert alert-danger'>Error: Could not load configuration from backup. Check logs.</div>");
+      else if (status == "error_backup_delete") response->print("<div class='alert alert-danger'>Error: Could not delete configuration backup. Check logs.</div>");
+      // ... (Restliche Statusmeldungen) ...
   }
 
-  // --- Backup/Restore Sektion ---
-  response->print("          <hr><h2>Backup / Restore Configuration</h2>");
-  response->print("          <div style='margin-bottom: 15px;'>");
-  response->print("            <a href='/backup' class='btn btn-info' style='margin-right: 10px;'>Download Backup (buttons.json)</a>");
-  response->print("          </div>");
-  response->print("          <div>");
-  response->print("            <form method='POST' action='/restore' enctype='multipart/form-data'>");
-  response->print("              <label for='restoreFile'>Restore from Backup:</label><br>");
-  response->print("              <input type='file' id='restoreFile' name='restoreFile' accept='.json' required>");
-  response->print("              <button type='submit' class='btn btn-warning'>Upload and Restore</button>");
+  // --- Backup/Restore Sektion (ALT - wird ersetzt/ergänzt) ---
+  // Den alten Teil mit Download/Upload kannst du behalten oder anpassen.
+  // Hier fügen wir das Speichern/Laden von benannten Backups hinzu.
+
+  response->print("          <hr><h2>Manage Configuration Backups</h2>");
+
+  // --- Formular zum Speichern eines benannten Backups ---
+  response->print("          <div style='margin-bottom: 20px;'>");
+  response->print("            <h4>Save Current Configuration As:</h4>");
+  response->print("            <form method='POST' action='/savebackup' class='form-inline'>");
+  response->print("              <div class='form-group'>");
+  response->print("                <label for='backup_name' class='sr-only'>Backup Name</label>");
+  response->print("                <input type='text' class='form-control' id='backup_name' name='backup_name' placeholder='e.g., living_room_setup' required>");
+  response->print("                <button type='submit' class='btn btn-primary'>Save Backup</button>");
+  response->print("                <a href='/backup' class='btn btn-info'>Download Active Config (buttons.json)</a>");
+  response->print("              </div>");
   response->print("            </form>");
-  response->print("          </div><hr>");
+ response->print("          </div>");
+
+  // --- Liste der vorhandenen Backups ---
+  response->print("          <h4>Available Backups:</h4>");
+  response->print("          <ul class='list-group'>");
+
+  // Verzeichnis /backups öffnen und Dateien auflisten
+  File backupDir = LittleFS.open("/backups");
+  if (!backupDir) {
+      response->print("<li class='list-group-item list-group-item-warning'>Could not open backups directory.</li>");
+  } else if (!backupDir.isDirectory()) {
+      response->print("<li class='list-group-item list-group-item-danger'>Error: /backups is not a directory!</li>");
+  } else {
+      File file = backupDir.openNextFile();
+      bool foundFiles = false;
+      while(file){
+          if (!file.isDirectory() && String(file.name()).endsWith(".json")) {
+              foundFiles = true;
+              String filename = String(file.name());
+              // Entferne den Pfad-Teil für die Anzeige
+              String displayName = filename;
+              if (displayName.startsWith("/backups/")) {
+                  displayName = displayName.substring(9); // Länge von "/backups/"
+              }
+
+              response->print("<li class='list-group-item'>");
+              response->print(displayName); // Zeige den Dateinamen an
+              response->print("<div style='float: right;'>"); // Buttons rechts
+              // Load Button
+              response->print("<a href='/loadbackup?name=" + filename + "' class='btn btn-xs btn-success' style='margin-left: 10px;' onclick='return confirm(\"Load backup \\'" + displayName + "\\'? This will overwrite the current active configuration.\");'>Load</a>");
+              // Delete Button
+              response->print("<a href='/deletebackup?name=" + filename + "' class='btn btn-xs btn-danger' style='margin-left: 5px;' onclick='return confirm(\"Delete backup \\'" + displayName + "\\'?\");'>Delete</a>");
+              response->print("</div>");
+              response->print("</li>\n");
+          }
+          file = backupDir.openNextFile();
+          yield(); // Wichtig bei vielen Dateien
+      }
+      if (!foundFiles) {
+          response->print("<li class='list-group-item'><em>No backups found.</em></li>");
+      }
+  }
+  if (backupDir) backupDir.close(); // Verzeichnis schließen
+
+  response->print("          </ul><hr>");
   // --- ENDE Backup/Restore Sektion ---
 
-  // --- ANZEIGE DER AKTUELLEN BUTTONS ---
-  response->print("          <h2>Current Buttons</h2>\n");
+
+  // --- ANZEIGE DER AKTUELLEN BUTTONS (FEHLENDER TEIL) ---
+  response->print("          <h2>Current Active Buttons</h2>\n"); // Titel für die Tabelle
   response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n");
   response->print("            <thead><tr><th>Name</th><th>Mode</th><th>Type</th><th>Data/Macro</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Actions</th></tr></thead>\n");
   response->print("            <tbody>\n");
@@ -2581,18 +2789,21 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   if (!buttonConfigs.empty()) {
     for (size_t i = 0; i < buttonConfigs.size(); ++i) {
       const auto& button = buttonConfigs[i];
-      // if (!button.configured) continue; // Überspringe nicht konfigurierte (Optional)
+
+      // Nur konfigurierte Buttons anzeigen (optional, aber sinnvoll, falls leere Einträge existieren könnten)
+      if (!button.configured) continue; 
 
       response->print("              <tr>\n");
       response->print("                <td>" + String(button.name) + "</td>\n"); // Name
       response->print("                <td>" + String(button.isMacro ? "Macro" : "Single") + "</td>\n"); // Mode
 
-      // Spalten basierend auf dem Modus füllen
+      // Spalten basierend auf dem Modus
       if (button.isMacro) {
           response->print("                <td><code>-</code></td>\n"); // Type N/A
           String macroSnippet = String(button.macroJson);
-          
-          if (macroSnippet.length() > 30) macroSnippet = macroSnippet.substring(0, 27) + "...";
+          if (macroSnippet.length() > 30) {
+              macroSnippet = macroSnippet.substring(0, 27) + "...";
+          }
           response->print("                <td><code style='font-size: 0.8em;'>" + macroSnippet + "</code></td>\n"); // Macro Snippet
           response->print("                <td><code>-</code></td>\n"); // Length N/A
           response->print("                <td><code>-</code></td>\n"); // Address N/A
@@ -2604,39 +2815,45 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
           response->print("                <td><code>" + String(button.length) + "</code></td>\n"); // Length
           response->print("                <td><code>" + (String(button.address).length() > 0 ? String(button.address) : "-") + "</code></td>\n"); // Address
           response->print("                <td><code>" + String(button.repeat) + "</code></td>\n"); // Repeat
+          // Output Pin mit GPIO Info
           String outText = String(button.out) + " (GPIO ";
-          switch(button.out) { /* ... GPIO Mapping ... */ }
+          switch(button.out) {
+              case 1: outText += String(pins1); break;
+              case 2: outText += String(pins2); break;
+              case 3: outText += String(pins3); break;
+              case 4: outText += String(pins4); break;
+              default: outText += "?"; break;
+          }
           outText += ")";
           response->print("                <td><code>" + outText + "</code></td>\n"); // Out
       }
 
-      // Actions Spalte (Edit/Delete Links)
+      // Actions Spalte
       response->print("                <td>\n");
       response->print("                  <a href='/editbutton?id=" + String(i) + "' class='btn btn-xs btn-warning' style='margin-right: 3px;'>Edit</a>\n");
-      response->print("                  <a href='/deletebutton?id=" + String(i) + "' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure?\");'>Delete</a>\n");
+      response->print("                  <a href='/deletebutton?id=" + String(i) + "' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure you want to delete button \\'" + String(button.name) + "\\'?\");'>Delete</a>\n");
       response->print("                </td>\n");
       response->print("              </tr>\n");
-      yield(); // Wichtig im Loop bei vielen Buttons
+      yield(); // Wichtig bei vielen Buttons
     }
   } else {
-    // Zeile für "Keine Buttons konfiguriert"
-    response->print("              <tr><td colspan='9' class='text-center'><em>No buttons configured.</em></td></tr>\n");
+    response->print("              <tr><td colspan='9' class='text-center'><em>No active buttons configured.</em></td></tr>\n");
   }
 
   response->print("            </tbody>\n");
   response->print("          </table>\n");
-  // --- ENDE ANZEIGE DER AKTUELLEN BUTTONS ---
+  // --- ENDE FEHLENDER TEIL ---
 
-  // --- AKTIONEN ---
-  response->print("          <a href='/addbutton' class='btn btn-success'>Add New Button</a>\n"); // Link zum Hinzufügen
-  response->print("          <a href='/' class='btn btn-default' style='margin-left: 10px;'>Back to Home</a>\n"); // Zurück zur Hauptseite
-  // --- ENDE AKTIONEN ---
+
+  // --- AKTIONEN (wie gehabt) ---
+  response->print("          <a href='/addbutton' class='btn btn-success'>Add New Button</a>\n");
+  response->print("          <a href='/' class='btn btn-default' style='margin-left: 10px;'>Back to Home</a>\n");
 
   response->print("        </div>\n"); // Ende col-md-12
   response->print("      </div>\n");   // Ende row
 
-  sendFooter(response); // Sendet den HTML-Footer
-  request->send(response); // Schließt den Stream und sendet die Antwort
+  sendFooter(response);
+  request->send(response);
 }
 
 //+=============================================================================
