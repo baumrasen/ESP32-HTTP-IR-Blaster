@@ -2199,8 +2199,8 @@ void handleSendIr(AsyncWebServerRequest *request) {
   Serial.println("    <- irblast call returned (from form).");
 
   // --- Redirect back to home page with success message ---
-  Serial.println("    -> Redirecting to /?status=success");
-  request->redirect("/?status=success");
+  Serial.println("    -> Redirecting to /buttons?status=manual_send_success"); // <-- Geänderte Log-Meldung
+  request->redirect("/buttons?status=manual_send_success"); // <-- ***** HIER DIE ÄNDERUNG *****
 }
 
 
@@ -2922,7 +2922,10 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
       else if (status == "error_backup_not_found") response->print("<div class='alert alert-danger'>Error: Specified backup file not found.</div>");
       else if (status == "error_backup_load") response->print("<div class='alert alert-danger'>Error: Could not load configuration from backup. Check logs.</div>");
       else if (status == "error_backup_delete") response->print("<div class='alert alert-danger'>Error: Could not delete configuration backup. Check logs.</div>");
-  }
+      else if (status == "manual_send_success") response->print("<div class='alert alert-success'>Manual IR code sent successfully.</div>");
+      else if (status == "error_missing_args") response->print("<div class='alert alert-danger'><strong>Error!</strong> Missing required form fields (type, data, length) for manual send.</div>");
+      else if (status == "error_invalid_args") response->print("<div class='alert alert-danger'><strong>Error!</strong> Invalid form data (e.g., length 0 or empty data) for manual send.</div>");
+    }
 
   // --- Backup/Restore Sektion ---
   response->print("          <hr><h2>Manage Configuration Backups</h2>");
@@ -3039,6 +3042,82 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
 
   response->print("        </div>\n"); // Ende col-md-12
   response->print("      </div>\n");   // Ende row
+
+  // +++ FORMULAR ZUM SENDEN +++
+  response->print("      <div class='row'>\n");
+  response->print("        <div class='col-md-12'>\n");
+  response->print("          <h3>Send IR Code</h3>\n");
+  response->print("          <form class='form-horizontal' action='/sendir' method='post'>\n");
+
+  // --- Hilfsvariablen & Lambdas (bleiben gleich) ---
+  String tempEncoding = "nec";
+  if (last_send.valid) { tempEncoding = String(last_send.encoding); tempEncoding.toLowerCase(); }
+  String lastEncoding = tempEncoding;
+  String lastData = last_send.valid ? String(last_send.data) : "";
+  String lastBits = last_send.valid ? String(last_send.bits) : "";
+  String lastAddress = last_send.valid ? String(last_send.address) : "";
+  String lastRepeat = last_send.valid ? String(last_send.repeat) : "1";
+  String lastOut = last_send.valid ? String(last_send.out) : "1";
+  auto addSelected = [&](const String& val) { return (val.equalsIgnoreCase(lastEncoding)) ? " selected" : ""; };
+  auto addOutSelected = [&](const String& val) { return (val == lastOut) ? " selected" : ""; };
+
+  // --- Encoding Type (Dropdown) ---
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='type' class='col-sm-2 control-label'>Type</label>\n");
+  response->print("              <div class='col-sm-10'>\n");
+  // --- Globale Funktion aufrufen ---
+  // Übergibt "type" als Namen des Select-Elements und lastEncoding als vorselektierten Wert
+  response->print(generateTypeDropdownHtml("type", lastEncoding));
+  response->print("              </div>\n");
+  response->print("            </div>\n");
+
+  // --- Data (Hex String) ---
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
+  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='data' name='data' placeholder='e.g., FF02FD' required value='" + lastData + "'></div>\n");
+  response->print("            </div>\n");
+
+  // --- Length (Bits) ---
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
+  response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='length' name='length' placeholder='e.g., 32' required value='" + lastBits + "'></div>\n");
+  response->print("            </div>\n");
+
+  // --- Address (Hex String, optional) ---
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='address' class='col-sm-2 control-label'>Address (Hex, optional)</label>\n");
+  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='address' name='address' placeholder='e.g., 0x404 (for Panasonic)' value='" + lastAddress + "'></div>\n");
+  response->print("            </div>\n");
+
+  // --- Repeat ---
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='repeat' class='col-sm-2 control-label'>Repeat</label>\n");
+  response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='repeat' name='repeat' value='" + lastRepeat + "' min='1'></div>\n");
+  response->print("            </div>\n");
+
+  // --- Output Pin ---
+  response->print("            <div class='form-group'>\n");
+  response->print("              <label for='out' class='col-sm-2 control-label'>Output Pin</label>\n");
+  response->print("              <div class='col-sm-10'>\n");
+  // --- Globale Funktion aufrufen ---
+  // Übergibt "out" als Namen und lastOut (als int konvertiert) als vorselektierten Wert
+  response->print(generateOutDropdownHtml("out", lastOut.toInt()));
+  response->print("              </div>\n");
+  response->print("            </div>\n");
+
+  // --- Submit Button ---
+  response->print("            <div class='form-group'>\n");
+  response->print("              <div class='col-sm-offset-2 col-sm-10'>\n");
+  response->print("                <button type='submit' class='btn btn-primary'>Send IR Code</button>\n");
+  response->print("              </div>\n");
+  response->print("            </div>\n");
+
+  response->print("          </form>\n");
+  response->print("        </div>\n");
+  response->print("      </div><hr />\n");
+  // +++ ENDE FORMULAR +++
+
+  yield(); // Keep the existing yield after the Received table
 
   sendFooter(response);
   request->send(response);
@@ -3616,7 +3695,7 @@ if (!buttonsWithoutLayout.empty()) {
 }
 
 // Link zum Konfigurieren (jetzt nach allen Buttons platziert)
-response->print("          <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
+response->print("          <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons / Send IR Code for testing</a>\n");
 
 response->print("        </div>\n"); // Ende col-md-12 (remote-buttons container)
 response->print("      </div><hr />\n"); // Ende row (remote-buttons container)
@@ -3724,82 +3803,6 @@ response->print("      </div><hr />\n"); // Ende row (remote-buttons container)
   response->print("          </div></div><hr />\n");
   
   yield(); // yield after the Received table
-
-  // +++ FORMULAR ZUM SENDEN +++
-  response->print("      <div class='row'>\n");
-  response->print("        <div class='col-md-12'>\n");
-  response->print("          <h3>Send IR Code</h3>\n");
-  response->print("          <form class='form-horizontal' action='/sendir' method='post'>\n");
-
-  // --- Hilfsvariablen & Lambdas (bleiben gleich) ---
-  String tempEncoding = "nec";
-  if (last_send.valid) { tempEncoding = String(last_send.encoding); tempEncoding.toLowerCase(); }
-  String lastEncoding = tempEncoding;
-  String lastData = last_send.valid ? String(last_send.data) : "";
-  String lastBits = last_send.valid ? String(last_send.bits) : "";
-  String lastAddress = last_send.valid ? String(last_send.address) : "";
-  String lastRepeat = last_send.valid ? String(last_send.repeat) : "1";
-  String lastOut = last_send.valid ? String(last_send.out) : "1";
-  auto addSelected = [&](const String& val) { return (val.equalsIgnoreCase(lastEncoding)) ? " selected" : ""; };
-  auto addOutSelected = [&](const String& val) { return (val == lastOut) ? " selected" : ""; };
-
-  // --- Encoding Type (Dropdown) ---
-  response->print("            <div class='form-group'>\n");
-  response->print("              <label for='type' class='col-sm-2 control-label'>Type</label>\n");
-  response->print("              <div class='col-sm-10'>\n");
-  // --- Globale Funktion aufrufen ---
-  // Übergibt "type" als Namen des Select-Elements und lastEncoding als vorselektierten Wert
-  response->print(generateTypeDropdownHtml("type", lastEncoding));
-  response->print("              </div>\n");
-  response->print("            </div>\n");
-
-  // --- Data (Hex String) ---
-  response->print("            <div class='form-group'>\n");
-  response->print("              <label for='data' class='col-sm-2 control-label'>Data (Hex)</label>\n");
-  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='data' name='data' placeholder='e.g., FF02FD' required value='" + lastData + "'></div>\n");
-  response->print("            </div>\n");
-
-  // --- Length (Bits) ---
-  response->print("            <div class='form-group'>\n");
-  response->print("              <label for='length' class='col-sm-2 control-label'>Length (Bits)</label>\n");
-  response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='length' name='length' placeholder='e.g., 32' required value='" + lastBits + "'></div>\n");
-  response->print("            </div>\n");
-
-  // --- Address (Hex String, optional) ---
-  response->print("            <div class='form-group'>\n");
-  response->print("              <label for='address' class='col-sm-2 control-label'>Address (Hex, optional)</label>\n");
-  response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='address' name='address' placeholder='e.g., 0x404 (for Panasonic)' value='" + lastAddress + "'></div>\n");
-  response->print("            </div>\n");
-
-  // --- Repeat ---
-  response->print("            <div class='form-group'>\n");
-  response->print("              <label for='repeat' class='col-sm-2 control-label'>Repeat</label>\n");
-  response->print("              <div class='col-sm-10'><input type='number' class='form-control' id='repeat' name='repeat' value='" + lastRepeat + "' min='1'></div>\n");
-  response->print("            </div>\n");
-
-  // --- Output Pin ---
-  response->print("            <div class='form-group'>\n");
-  response->print("              <label for='out' class='col-sm-2 control-label'>Output Pin</label>\n");
-  response->print("              <div class='col-sm-10'>\n");
-  // --- Globale Funktion aufrufen ---
-  // Übergibt "out" als Namen und lastOut (als int konvertiert) als vorselektierten Wert
-  response->print(generateOutDropdownHtml("out", lastOut.toInt()));
-  response->print("              </div>\n");
-  response->print("            </div>\n");
-
-  // --- Submit Button ---
-  response->print("            <div class='form-group'>\n");
-  response->print("              <div class='col-sm-offset-2 col-sm-10'>\n");
-  response->print("                <button type='submit' class='btn btn-primary'>Send IR Code</button>\n");
-  response->print("              </div>\n");
-  response->print("            </div>\n");
-
-  response->print("          </form>\n");
-  response->print("        </div>\n");
-  response->print("      </div><hr />\n");
-  // +++ ENDE FORMULAR +++
-
-  yield(); // Keep the existing yield after the Received table
 
   // --- Schreibe Footer in den Stream ---
   sendFooter(response); // Übergibt den Stream
