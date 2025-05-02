@@ -141,7 +141,7 @@ std::vector<ButtonConfig> buttonConfigs;
 //+=============================================================================
 
 
-// +++ HILFSFUNKTION ZUR NORMALISIERUNG (bleibt gleich) +++
+// +++ HILFSFUNKTION ZUR NORMALISIERUNG +++
 String normalizeHex(String hexStr) {
   hexStr.trim(); // Entferne Leerzeichen am Anfang/Ende
   if (hexStr.startsWith("0x")) {
@@ -151,7 +151,7 @@ String normalizeHex(String hexStr) {
   return hexStr;
 }
 
-// +++ KORRIGIERTE findMatchingButtonName (mit numerischem Adressvergleich) +++
+// +++ findMatchingButtonName (mit numerischem Adressvergleich) +++
 String findMatchingButtonName(const Code& codeToMatch) {
   if (!codeToMatch.valid || strlen(codeToMatch.encoding) == 0 || strlen(codeToMatch.data) == 0 || codeToMatch.bits <= 0) {
       return "";
@@ -207,7 +207,7 @@ String findMatchingButtonName(const Code& codeToMatch) {
           // --- ENDE KORRIGIERTER Adress-Vergleich ---
 
           if (addressMatch) {
-              Serial.printf("      MATCH FOUND! Button: %s\n", button.name); // Debug
+              // Serial.printf("      MATCH FOUND! Button: %s\n", button.name); // Debug
               return String(button.name); // Treffer gefunden!
           } else {
               // Serial.println("      Address mismatch prevented match."); // Debug
