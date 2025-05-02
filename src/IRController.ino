@@ -122,7 +122,7 @@ File fsUploadFile;
 //+=============================================================================
 // Button Configuration
 //+=============================================================================
-const int MAX_BUTTONS = 9; // Maximale Anzahl an Buttons
+const int MAX_BUTTONS = 24; // Maximale Anzahl an Buttons
 
 struct ButtonConfig {
   char name[32] = "";      // Name des Buttons
@@ -1079,11 +1079,22 @@ void generateAndWriteJavaScript() {
   newJsContent += F("\n");
   newJsContent += F("  // +++ ANGEPASSTE ZELLE FÜR BUTTON MATCH +++\n");
   newJsContent += F("  let matchCell = '<td>-</td>'; // Default: Kein Match\n");
-  newJsContent += F("  // Prüfe, ob Name UND Farbe vorhanden sind\n");
+
+  newJsContent += F("  // Prüfe, ob Name UND Farbe vorhanden sind (Match gefunden)\n");
   newJsContent += F("  if (codeData.matchedButtonName && codeData.matchedButtonName.length > 0 && codeData.matchedButtonColor && codeData.matchedButtonColor.length > 0) {\n");
-  newJsContent += F("      // Leite Label-Klasse ab (ersetze btn- durch label-)\n");
   newJsContent += F("      const labelClass = codeData.matchedButtonColor.replace('btn-', 'label-');\n");
   newJsContent += F("      matchCell = `<td><span class='label ${labelClass}'>${codeData.matchedButtonName}</span></td>`;\n");
+  newJsContent += F("  }\n");
+  // --- NEU: Wenn kein Match UND es die Received-Tabelle ist -> Create Button Link ---
+  newJsContent += F("  else if (!isSentTable) { // Nur für Received-Tabelle\n");
+  newJsContent += F("      let createUrl = `/addbutton?prefill_type=${encodeURIComponent(codeData.encoding || '')}`;\n"); // URL Encoding sicherheitshalber
+  newJsContent += F("      createUrl += `&prefill_data=${encodeURIComponent(codeData.data || '')}`;\n");
+  newJsContent += F("      createUrl += `&prefill_length=${codeData.bits || ''}`;\n");
+  newJsContent += F("      // Adresse nur hinzufügen, wenn vorhanden und nicht '0x0' (vereinfachte Prüfung)\n");
+  newJsContent += F("      if (codeData.address && codeData.address !== '0x0' && codeData.address !== '0') {\n");
+  newJsContent += F("          createUrl += `&prefill_address=${encodeURIComponent(codeData.address)}`;\n");
+  newJsContent += F("      }\n");
+  newJsContent += F("      matchCell = `<td><a href='${createUrl}' class='btn btn-xs btn-success' title='Create button from this code'>🆕 Create Button</a></td>`;\n");
   newJsContent += F("  }\n");
   newJsContent += F("  newRowHtml += matchCell; // Füge die Match-Zelle hinzu\n");
   newJsContent += F("  // +++ ENDE ANGEPASSTE ZELLE +++\n");
@@ -1561,17 +1572,58 @@ void handleRestoreRequest(AsyncWebServerRequest *request) {
 }
 
 // Handler zum Anzeigen des "Add New Button"-Formulars
+// Handler zum Anzeigen des "Add New Button"-Formulars
 void handleAddButtonPage(AsyncWebServerRequest *request) {
-Serial.println("Connection received endpoint '/addbutton' (GET)");
-AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", 200);
-sendHeader(response);
-ButtonConfig emptyButton; // Leeres Struct für leeres Formular
-emptyButton.repeat = 1; // Standardwerte setzen
-emptyButton.out = 1;
-generateButtonForm(response, emptyButton, -1); // -1 signalisiert "neu"
-sendFooter(response);
-request->send(response);
+  Serial.println("Connection received endpoint '/addbutton' (GET)");
+  AsyncResponseStream *response = request->beginResponseStream("text/html; charset=utf-8", 200);
+  sendHeader(response);
+
+  ButtonConfig prefilledButton; // Leeres Struct für Formular
+  prefilledButton.repeat = 1;   // Standardwerte setzen
+  prefilledButton.out = 1;
+  strncpy(prefilledButton.colorClass, "btn-primary", sizeof(prefilledButton.colorClass) -1); // Default Farbe
+  prefilledButton.colorClass[sizeof(prefilledButton.colorClass) - 1] = '\0';
+  prefilledButton.layoutRow = -1; // Default Layout
+  prefilledButton.layoutCol = -1;
+  prefilledButton.isMacro = false; // Default: Single IR
+
+  // --- NEU: Prüfe auf Prefill-Parameter ---
+  bool prefilled = false;
+  if (request->hasParam("prefill_type")) {
+    strncpy(prefilledButton.type, request->getParam("prefill_type")->value().c_str(), sizeof(prefilledButton.type) - 1);
+    prefilledButton.type[sizeof(prefilledButton.type) - 1] = '\0';
+    prefilled = true;
+  }
+  if (request->hasParam("prefill_data")) {
+    strncpy(prefilledButton.data, request->getParam("prefill_data")->value().c_str(), sizeof(prefilledButton.data) - 1);
+    prefilledButton.data[sizeof(prefilledButton.data) - 1] = '\0';
+    prefilled = true;
+  }
+  if (request->hasParam("prefill_length")) {
+    prefilledButton.length = request->getParam("prefill_length")->value().toInt();
+    if (prefilledButton.length <= 0) prefilledButton.length = 0; // Korrektur bei ungültiger Zahl
+    prefilled = true;
+  }
+  if (request->hasParam("prefill_address")) {
+    strncpy(prefilledButton.address, request->getParam("prefill_address")->value().c_str(), sizeof(prefilledButton.address) - 1);
+    prefilledButton.address[sizeof(prefilledButton.address) - 1] = '\0';
+    prefilled = true;
+  }
+  if (prefilled) {
+      Serial.println("  Prefilling 'Add Button' form from URL parameters.");
+      // Optional: Einen Standardnamen vorschlagen
+      String suggestedName = "New_" + String(prefilledButton.type) + "_" + String(prefilledButton.data);
+      suggestedName.toUpperCase();
+      strncpy(prefilledButton.name, suggestedName.c_str(), sizeof(prefilledButton.name) - 1);
+      prefilledButton.name[sizeof(prefilledButton.name) - 1] = '\0';
+  }
+  // --- ENDE NEU ---
+
+  generateButtonForm(response, prefilledButton, -1); // -1 signalisiert "neu", prefilledButton enthält ggf. Daten
+  sendFooter(response);
+  request->send(response);
 }
+
 
 // Handler zum Anzeigen des "Edit Button"-Formulars
 void handleEditButtonPage(AsyncWebServerRequest *request) {
@@ -3786,15 +3838,33 @@ response->print("      </div><hr />\n"); // Ende row (remote-buttons container)
   response->print("            <tbody id='received-codes-body'>\n");
   auto generateReceivedRow = [&](const Code& code, int id) {
       if (code.valid) {
-          const ButtonConfig* matchedButton = findMatchingButton(code); // <-- Aufruf der neuen Funktion
-          String matchCell = "<td>-</td>"; // Default
+          const ButtonConfig* matchedButton = findMatchingButton(code);
+          String matchCell = ""; // Leeren String initialisieren
+
           if (matchedButton != nullptr) {
+              // --- Match gefunden: Farbigen Label anzeigen ---
               String labelClass = String(matchedButton->colorClass);
               labelClass.replace("btn-", "label-");
-              matchCell = "<td><span class='label " + labelClass + "'>" + String(matchedButton->name) + "</span></td>"; // <-- Verwende Name und abgeleitete Klasse
+              matchCell = "<td><span class='label " + labelClass + "'>" + String(matchedButton->name) + "</span></td>";
+          } else {
+              // --- KEIN Match gefunden: "Create Button"-Link anzeigen ---
+              // Baue die URL mit Prefill-Parametern
+              String createUrl = "/addbutton?";
+              createUrl += "prefill_type=" + String(code.encoding);
+              createUrl += "&prefill_data=" + String(code.data);
+              createUrl += "&prefill_length=" + String(code.bits);
+              // Adresse nur hinzufügen, wenn sie nicht "0x0" oder leer ist (optional, aber sauberer)
+              String normAddr = normalizeHex(String(code.address));
+              if (normAddr.length() > 0 && normAddr != "0") {
+                 createUrl += "&prefill_address=" + String(code.address); // Originalformat beibehalten
+              }
+              // Optional: Weitere Defaults wie repeat=1, out=1 könnten hier auch gesetzt werden
+
+              matchCell = "<td><a href='" + createUrl + "' class='btn btn-xs btn-success' title='Create button from this code'>Create Button</a></td>";
           }
-          // Generiere die Zeile mit der (ggf. aktualisierten) matchCell
-          String rowHtml = "              <tr class='text-uppercase'><td><a href='/received?id=" + String(id) + "'>" + epochToString(code.timestamp) + "</a></td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td>" + matchCell + "</tr>\n"; // <-- matchCell am Ende
+
+          // Generiere die Zeile mit der matchCell
+          String rowHtml = "              <tr class='text-uppercase'><td><a href='/received?id=" + String(id) + "'>" + epochToString(code.timestamp) + "</a></td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td>" + matchCell + "</tr>\n";
           response->print(rowHtml);
       }
   };
