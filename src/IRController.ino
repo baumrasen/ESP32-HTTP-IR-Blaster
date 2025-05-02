@@ -135,6 +135,9 @@ struct ButtonConfig {
   bool isMacro = false;    //  Ist dieser Button ein Makro?
   char macroJson[512] = ""; //  JSON-String für das Makro (Größe ggf. anpassen)
   bool configured = false; // Ist dieser Button-Slot konfiguriert?
+  int layoutRow = -1; // Zeile im Layout (-1 = nicht spezifiziert/Standardfluss)
+  int layoutCol = -1; // Spalte im Layout (-1 = nicht spezifiziert/Standardfluss)
+ 
 };
 
 std::vector<ButtonConfig> buttonConfigs;
@@ -266,6 +269,8 @@ bool saveConfigToFile(const char* filePath) {
         buttonJson["repeat"] = button.repeat; buttonJson["out"] = button.out;
         buttonJson["macroJson"] = "";
      }
+     buttonJson["layoutRow"] = button.layoutRow;
+     buttonJson["layoutCol"] = button.layoutCol;
   }
 
   File configFile = LittleFS.open(filePath, "w");
@@ -552,7 +557,10 @@ void loadButtonConfig() {
           newButton.type[sizeof(newButton.type) - 1] = '\0';
           newButton.data[sizeof(newButton.data) - 1] = '\0';
           newButton.address[sizeof(newButton.address) - 1] = '\0';
-          newButton.macroJson[sizeof(newButton.macroJson) - 1] = '\0'; // NEU
+          newButton.macroJson[sizeof(newButton.macroJson) - 1] = '\0';
+          newButton.layoutRow = buttonJson["layoutRow"] | -1; // Default -1, falls nicht in JSON
+          newButton.layoutCol = buttonJson["layoutCol"] | -1; // Default -1, falls nicht in JSON
+
 
           // Gültigkeitsprüfung anpassen:
           // Ein Button ist gültig, wenn er einen Namen hat UND
@@ -1341,6 +1349,16 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   response->print("              <div class='col-sm-10'><input type='text' class='form-control' id='" + prefix + "name' name='" + prefix + "name' placeholder='Button Label' value='" + String(buttonData.name) + "' required></div>\n");
   response->print("            </div>\n");
 
+    // --- Layout Row ---
+    response->print("            <div class='form-group'>\n");
+    response->print("              <label for='" + prefix + "layoutRow' class='col-sm-2 control-label'>Layout Row</label>\n");
+    response->print("              <div class='col-sm-4'><input type='number' class='form-control' id='" + prefix + "layoutRow' name='" + prefix + "layoutRow' placeholder='Row (e.g., 0)' value='" + String(buttonData.layoutRow == -1 ? "" : String(buttonData.layoutRow)) + "' min='0'></div>\n");
+    // --- Layout Column ---
+    response->print("              <label for='" + prefix + "layoutCol' class='col-sm-2 control-label'>Layout Column</label>\n");
+    response->print("              <div class='col-sm-4'><input type='number' class='form-control' id='" + prefix + "layoutCol' name='" + prefix + "layoutCol' placeholder='Column (e.g., 0)' value='" + String(buttonData.layoutCol == -1 ? "" : String(buttonData.layoutCol)) + "' min='0'></div>\n");
+    response->print("              <span class='help-block col-sm-offset-2 col-sm-10'>Optional: Specify row/column for grid layout (starting from 0). Leave blank for default flow.</span>\n");
+    response->print("            </div>\n");
+
   // --- Button Type Selector (Radios) ---
   response->print("            <div class='form-group'>\n");
   response->print("              <label class='col-sm-2 control-label'>Button Type</label>\n");
@@ -1580,6 +1598,8 @@ void handleSaveButton(AsyncWebServerRequest *request) {
   String outStr = "";    // Out als String lesen
   String isMacroStr = "";
   String macroJson = "";
+  String layoutRowStr = "";
+  String layoutColStr = "";
   bool buttonIdFound = false;
 
   for(int i=0; i<params; i++){
@@ -1613,6 +1633,10 @@ void handleSaveButton(AsyncWebServerRequest *request) {
         repeatStr = paramValue;
       } else if (paramName.equals("btn_out")) {
         outStr = paramValue;
+      } else if (paramName.equals("btn_layoutRow")) {
+        layoutRowStr = paramValue;
+      } else if (paramName.equals("btn_layoutCol")) {
+        layoutColStr = paramValue;
       }
     } else {
        Serial.printf("      Ignoring non-POST param[%s]: %s\n", p->name().c_str(), p->value().c_str());
@@ -1633,6 +1657,12 @@ void handleSaveButton(AsyncWebServerRequest *request) {
   int length = lengthStr.toInt();
   int repeat = repeatStr.toInt();
   int out = outStr.toInt();
+  // ... (andere Konvertierungen) ...
+  int layoutRow = layoutRowStr.toInt();
+  int layoutCol = layoutColStr.toInt();
+  // Konvertiere leere Eingaben oder 0 zu -1 für "nicht gesetzt"
+  if (layoutRowStr.length() == 0 || layoutRow < 0) layoutRow = -1;
+  if (layoutColStr.length() == 0 || layoutCol < 0) layoutCol = -1;
   
   name.trim();  // Trimme den Namen
 
@@ -1647,6 +1677,8 @@ void handleSaveButton(AsyncWebServerRequest *request) {
   Serial.println("address (String): " + address);
   Serial.println("repeatStr: " + repeatStr);
   Serial.println("outStr: " + outStr);
+  Serial.println("layoutRowStr: " + layoutRowStr + " -> " + String(layoutRow));
+  Serial.println("layoutColStr: " + layoutColStr + " -> " + String(layoutCol));
   Serial.println("------------------------");
 
   // --- Validierung ---
@@ -1713,6 +1745,8 @@ if (isMacro) {
  strncpy(tempButton.name, name.c_str(), sizeof(tempButton.name) - 1);
  tempButton.name[sizeof(tempButton.name) - 1] = '\0';
  tempButton.isMacro = isMacro;
+ tempButton.layoutRow = layoutRow;
+ tempButton.layoutCol = layoutCol;
 
  // Modus-spezifische Felder
  if (isMacro) {
@@ -2893,7 +2927,7 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   // --- ANZEIGE DER AKTUELLEN BUTTONS (FEHLENDER TEIL) ---
   response->print("          <h2>Current Active Buttons</h2>\n"); // Titel für die Tabelle
   response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n");
-  response->print("            <thead><tr><th>Name</th><th>Mode</th><th>Type</th><th>Data/Macro</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Actions</th></tr></thead>\n");
+  response->print("            <thead><tr><th>ID</th><th>Name</th><th>Row</th><th>Col</th><th>Type</th><th>Data/Macro Preview</th><th>Mode</th><th>Actions</th></tr></thead>\n"); // <-- NEUE SPALTEN: Row, Col
   response->print("            <tbody>\n");
 
   if (!buttonConfigs.empty()) {
@@ -2905,6 +2939,8 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
 
       response->print("              <tr>\n");
       response->print("                <td>" + String(button.name) + "</td>\n"); // Name
+      response->print("<td>" + String(button.layoutRow) + "</td>"); // Zeigt -1 an, wenn nicht gesetzt
+      response->print("<td>" + String(button.layoutCol) + "</td>"); // Zeigt -1 an, wenn nicht gesetzt
       response->print("                <td>" + String(button.isMacro ? "Macro" : "Single") + "</td>\n"); // Mode
 
       // Spalten basierend auf dem Modus
@@ -2947,7 +2983,7 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
       yield(); // Wichtig bei vielen Buttons
     }
   } else {
-    response->print("              <tr><td colspan='9' class='text-center'><em>No active buttons configured.</em></td></tr>\n");
+    response->print("              <tr><td colspan='11' class='text-center'><em>No active buttons configured.</em></td></tr>\n");
   }
 
   response->print("            </tbody>\n");
@@ -3425,35 +3461,61 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("          </script>\n");
   // yield(); // The yield inside the loop makes this one potentially redundant, but keep it for safety for now.
 
-  // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN +++ // <--- Kommentar im Code
+  // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN (GRID LAYOUT) +++
   response->print("      <div class='row'>\n");
-  // HIER WIRD DAS DIV MIT DER ID ERZEUGT:
-  response->print("        <div class='col-md-12' id='remote-buttons'>\n"); 
+  response->print("        <div class='col-md-12' id='remote-buttons'>\n"); // Container behalten
   response->print("          <h3>Remote Buttons</h3>\n");
 
-  // // --- Debugging around vector access ---
-  // Serial.printf("      Heap BEFORE vector check: %u\n", ESP.getFreeHeap());
-  // Serial.printf("      Checking buttonConfigs.size() = %d\n", buttonConfigs.size()); // Check size first
-  // Serial.println("      Checking if buttonConfigs is empty...");
-  if (!buttonConfigs.empty()) {
-    // Serial.println("      Vector is NOT empty. Entering loop."); // Log entry into loop block
-    for (size_t i = 0; i < buttonConfigs.size(); ++i) {
-      // Serial.printf("      Loop iteration i=%d\n", i); // Log each iteration start
-      // --- Add heap check inside loop ---
-      if (i % 2 == 0) { // Check heap every few iterations
-        //  Serial.printf("        Heap inside loop (i=%d): %u\n", i, ESP.getFreeHeap());
-      }
-      // --- End heap check ---
-      const auto& button = buttonConfigs[i];
-      if (!button.configured) {
-        //  Serial.printf("        Skipping button %d (not configured)\n", i);
-         continue;
-      }
+  // --- Grid-Logik ---
+  int maxRow = -1;
+  int maxCol = -1;
+  std::vector<ButtonConfig*> buttonsWithLayout;
+  std::vector<ButtonConfig*> buttonsWithoutLayout;
 
-      String buttonId = "btn_" + String(i);
+  // 1. Buttons sortieren und maxRow/maxCol finden
+  for (auto& button : buttonConfigs) { // Referenz verwenden!
+    if (button.configured) {
+        if (button.layoutRow >= 0 && button.layoutCol >= 0) {
+            buttonsWithLayout.push_back(&button); // Zeiger speichern
+            if (button.layoutRow > maxRow) maxRow = button.layoutRow;
+            if (button.layoutCol > maxCol) maxCol = button.layoutCol;
+        } else {
+            buttonsWithoutLayout.push_back(&button); // Zeiger speichern
+        }
+    }
+}
+Serial.printf("    Grid Layout: Max Row = %d, Max Col = %d\n", maxRow, maxCol);
 
-                // --- buttonHtml ---
-                String buttonHtml = "            <button id='" + buttonId + "' class='btn btn-primary btn-lg remote-button' style='margin: 5px;' ";
+// 2. Grid generieren (wenn Layout-Buttons vorhanden sind)
+if (maxRow >= 0 && maxCol >= 0) {
+    // Bestimme die Spaltenbreite (z.B. 12 / (maxCol + 1))
+    // Hier ein Beispiel für max. 4 Spalten (col-xs-3), anpassbar!
+    int colsPerButton = 3; // 12 / 4 = 3 -> 4 Spalten auf kleinsten Screens
+    if (maxCol + 1 > 4) colsPerButton = 2; // Bei mehr als 4 Spalten -> 6 Spalten (col-xs-2)
+    if (maxCol + 1 > 6) colsPerButton = 1; // Bei mehr als 6 Spalten -> 12 Spalten (col-xs-1)
+    String colClass = "col-xs-" + String(colsPerButton) + " text-center"; // Zentriert den Inhalt
+
+    Serial.printf("    Using column class: %s\n", colClass.c_str());
+
+    for (int r = 0; r <= maxRow; ++r) {
+        response->print("          <div class='row' style='margin-bottom: 10px;'>\n"); // Eine Bootstrap-Reihe pro Layout-Zeile
+        for (int c = 0; c <= maxCol; ++c) {
+            ButtonConfig* btnPtr = nullptr;
+            // Finde den Button für diese Zelle (r, c)
+            for (auto* p : buttonsWithLayout) {
+                if (p->layoutRow == r && p->layoutCol == c) {
+                    btnPtr = p;
+                    break;
+                }
+            }
+
+            response->print("            <div class='" + colClass + "'>\n"); // Spalte öffnen
+            if (btnPtr != nullptr) {
+                // Button gefunden -> HTML generieren
+                const ButtonConfig& button = *btnPtr; // Dereferenzieren
+                String buttonId = "btn_" + String(std::distance(buttonConfigs.data(), btnPtr)); // Index im Originalvektor finden
+
+                String buttonHtml = "<button id='" + buttonId + "' class='btn btn-primary btn-lg remote-button' style='margin: 2px;' "; // Kleinere Margin im Grid
                 buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
                 if (!button.isMacro) {
                     buttonHtml += "data-type='" + String(button.type) + "' ";
@@ -3466,21 +3528,58 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
                 buttonHtml += ">";
                 buttonHtml += String(button.name);
                 buttonHtml += "</button>\n";
-      
                 response->print(buttonHtml);
-                yield();
-              }
             } else {
+                // Kein Button für diese Zelle -> Platzhalter
+                response->print("&nbsp;"); // Leeres Leerzeichen für Höhe oder leeres Div
+            }
+            response->print("            </div>\n"); // Spalte schließen
+            yield(); // Innerhalb der Spaltenschleife
+        }
+        response->print("          </div>\n"); // Bootstrap-Reihe schließen
+        yield(); // Nach jeder Reihe
+    }
+    response->print("<hr/>"); // Trennlinie nach dem Grid
+} // Ende if (maxRow >= 0)
 
-    response->print("            <p><em>No remote buttons configured yet.</em></p>\n");
-  }
+// 3. Buttons ohne Layout-Info anhängen (Standardfluss)
+if (!buttonsWithoutLayout.empty()) {
+    response->print("          <div class='row'>\n"); // Eigene Reihe für Buttons ohne Layout
+    response->print("            <div class='col-xs-12'>\n"); // Volle Breite
+    response->print("              <h4>Other Buttons:</h4>\n");
+    for (auto* btnPtr : buttonsWithoutLayout) {
+        const ButtonConfig& button = *btnPtr;
+        String buttonId = "btn_" + String(std::distance(buttonConfigs.data(), btnPtr));
+
+        // Button HTML (wie oben, aber mit Standard-Margin)
+        String buttonHtml = "<button id='" + buttonId + "' class='btn btn-primary btn-lg remote-button' style='margin: 5px;' ";
+        buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
+        if (!button.isMacro) {
+            buttonHtml += "data-type='" + String(button.type) + "' ";
+            buttonHtml += "data-data='" + String(button.data) + "' ";
+            buttonHtml += "data-length='" + String(button.length) + "' ";
+            buttonHtml += "data-address='" + String(button.address) + "' ";
+            buttonHtml += "data-repeat='" + String(button.repeat) + "' ";
+            buttonHtml += "data-out='" + String(button.out) + "'";
+        }
+        buttonHtml += ">";
+        buttonHtml += String(button.name);
+        buttonHtml += "</button>\n";
+        response->print(buttonHtml);
+        yield();
+    }
+    response->print("            </div>\n");
+    response->print("          </div><hr/>\n"); // Trennlinie nach den "anderen" Buttons
+}
+
+// Link zum Konfigurieren (jetzt nach allen Buttons platziert)
+response->print("          <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
+
+response->print("        </div>\n"); // Ende col-md-12 (remote-buttons container)
+response->print("      </div><hr />\n"); // Ende row (remote-buttons container)
+// +++ ENDE FERNBEDIENUNGS-BUTTONS (GRID LAYOUT) +++
 
   yield();
-
-    // Link zum Konfigurieren und Ende des Divs
-    response->print("            <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons</a>\n");
-    response->print("          </div>\n"); // <-- Ende von <div id='remote-buttons'>
-    response->print("      </div><hr />\n");
 
     // +++ Feedback vom Formular anzeigen +++
     if (request->hasParam("status")) {
