@@ -2829,6 +2829,7 @@ void fullCode (decode_results *results)
                    "Edit IRController.ino and increase captureBufSize");
 }
 
+
 void sendButtonConfigPage(AsyncWebServerRequest *request) {
   Serial.println("Connection received endpoint '/buttons' (GET)");
 
@@ -2844,7 +2845,13 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
       // Bestehende Status...
       if (status == "saved") response->print("<div class='alert alert-success'>Button saved successfully.</div>");
       else if (status == "deleted") response->print("<div class='alert alert-success'>Button deleted successfully.</div>");
-      // ... andere bestehende Fehler ...
+      else if (status == "error_invalid_id") response->print("<div class='alert alert-danger'>Error: Invalid button ID specified.</div>");
+      else if (status == "error_invalid_data") response->print("<div class='alert alert-danger'>Error: Invalid data submitted for button.</div>");
+      else if (status == "error_save") response->print("<div class='alert alert-danger'>Error: Could not save button configuration.</div>");
+      else if (status == "error_max_buttons") response->print("<div class='alert alert-warning'>Warning: Maximum number of buttons reached. Could not add new button.</div>");
+      else if (status == "error_invalid_json") response->print("<div class='alert alert-danger'>Error: Invalid JSON format for Macro.</div>");
+      else if (status == "error_json_not_array") response->print("<div class='alert alert-danger'>Error: Macro JSON must be a valid JSON array.</div>");
+      else if (status == "error_invalid_macro_data") response->print("<div class='alert alert-danger'>Error: Macro JSON cannot be empty.</div>");
       // Status für Backup/Restore
       else if (status == "backup_saved") response->print("<div class='alert alert-success'>Configuration backup saved successfully.</div>");
       else if (status == "backup_loaded") response->print("<div class='alert alert-success'>Configuration restored successfully from backup.</div>");
@@ -2856,16 +2863,10 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
       else if (status == "error_backup_not_found") response->print("<div class='alert alert-danger'>Error: Specified backup file not found.</div>");
       else if (status == "error_backup_load") response->print("<div class='alert alert-danger'>Error: Could not load configuration from backup. Check logs.</div>");
       else if (status == "error_backup_delete") response->print("<div class='alert alert-danger'>Error: Could not delete configuration backup. Check logs.</div>");
-      // ... (Restliche Statusmeldungen) ...
   }
 
-  // --- Backup/Restore Sektion (ALT - wird ersetzt/ergänzt) ---
-  // Den alten Teil mit Download/Upload kannst du behalten oder anpassen.
-  // Hier fügen wir das Speichern/Laden von benannten Backups hinzu.
-
+  // --- Backup/Restore Sektion ---
   response->print("          <hr><h2>Manage Configuration Backups</h2>");
-
-  // --- Formular zum Speichern eines benannten Backups ---
   response->print("          <div style='margin-bottom: 20px;'>");
   response->print("            <h4>Save Current Configuration As:</h4>");
   response->print("            <form method='POST' action='/savebackup' class='form-inline'>");
@@ -2876,13 +2877,9 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   response->print("                <a href='/backup' class='btn btn-info'>Download Active Config (buttons.json)</a>");
   response->print("              </div>");
   response->print("            </form>");
- response->print("          </div>");
-
-  // --- Liste der vorhandenen Backups ---
+  response->print("          </div>");
   response->print("          <h4>Available Backups:</h4>");
   response->print("          <ul class='list-group'>");
-
-  // Verzeichnis /backups öffnen und Dateien auflisten
   File backupDir = LittleFS.open("/backups");
   if (!backupDir) {
       response->print("<li class='list-group-item list-group-item-warning'>Could not open backups directory.</li>");
@@ -2895,101 +2892,85 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
           if (!file.isDirectory() && String(file.name()).endsWith(".json")) {
               foundFiles = true;
               String filename = String(file.name());
-              // Entferne den Pfad-Teil für die Anzeige
               String displayName = filename;
               if (displayName.startsWith("/backups/")) {
-                  displayName = displayName.substring(9); // Länge von "/backups/"
+                  displayName = displayName.substring(9);
               }
-
               response->print("<li class='list-group-item'>");
-              response->print(displayName); // Zeige den Dateinamen an
-              response->print("<div style='float: right;'>"); // Buttons rechts
-              // Load Button
+              response->print(displayName);
+              response->print("<div style='float: right;'>");
               response->print("<a href='/loadbackup?name=" + filename + "' class='btn btn-xs btn-success' style='margin-left: 10px;' onclick='return confirm(\"Load backup \\'" + displayName + "\\'? This will overwrite the current active configuration.\");'>Load</a>");
-              // Delete Button
               response->print("<a href='/deletebackup?name=" + filename + "' class='btn btn-xs btn-danger' style='margin-left: 5px;' onclick='return confirm(\"Delete backup \\'" + displayName + "\\'?\");'>Delete</a>");
               response->print("</div>");
               response->print("</li>\n");
           }
           file = backupDir.openNextFile();
-          yield(); // Wichtig bei vielen Dateien
+          yield();
       }
       if (!foundFiles) {
           response->print("<li class='list-group-item'><em>No backups found.</em></li>");
       }
   }
-  if (backupDir) backupDir.close(); // Verzeichnis schließen
-
+  if (backupDir) backupDir.close();
   response->print("          </ul><hr>");
   // --- ENDE Backup/Restore Sektion ---
 
-
-  // --- ANZEIGE DER AKTUELLEN BUTTONS (FEHLENDER TEIL) ---
-  response->print("          <h2>Current Active Buttons</h2>\n"); // Titel für die Tabelle
+  // --- ANZEIGE DER AKTUELLEN BUTTONS (KORRIGIERT) ---
+  response->print("          <h2>Current Active Buttons</h2>\n");
   response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n");
-  response->print("            <thead><tr><th>ID</th><th>Name</th><th>Row</th><th>Col</th><th>Type</th><th>Data/Macro Preview</th><th>Mode</th><th>Actions</th></tr></thead>\n"); // <-- NEUE SPALTEN: Row, Col
+  // --- KORRIGIERTER Tabellenkopf ---
+  response->print("            <thead><tr><th>ID</th><th>Name</th><th>Row</th><th>Col</th><th>Type</th><th>Data/Macro Preview</th><th>Mode</th><th>Actions</th></tr></thead>\n");
   response->print("            <tbody>\n");
 
   if (!buttonConfigs.empty()) {
     for (size_t i = 0; i < buttonConfigs.size(); ++i) {
       const auto& button = buttonConfigs[i];
 
-      // Nur konfigurierte Buttons anzeigen (optional, aber sinnvoll, falls leere Einträge existieren könnten)
-      if (!button.configured) continue; 
+      // Nur konfigurierte Buttons anzeigen
+      if (!button.configured) continue;
 
       response->print("              <tr>\n");
+      // --- KORRIGIERTE Reihenfolge und Inhalt der Zellen ---
+      response->print("                <td>" + String(i) + "</td>\n"); // ID
       response->print("                <td>" + String(button.name) + "</td>\n"); // Name
-      response->print("<td>" + String(button.layoutRow) + "</td>"); // Zeigt -1 an, wenn nicht gesetzt
-      response->print("<td>" + String(button.layoutCol) + "</td>"); // Zeigt -1 an, wenn nicht gesetzt
-      response->print("                <td>" + String(button.isMacro ? "Macro" : "Single") + "</td>\n"); // Mode
+      response->print("                <td>" + String(button.layoutRow) + "</td>\n"); // Row
+      response->print("                <td>" + String(button.layoutCol) + "</td>\n"); // Col
 
-      // Spalten basierend auf dem Modus
+      // Conditional columns based on mode
       if (button.isMacro) {
-          response->print("                <td><code>-</code></td>\n"); // Type N/A
+          response->print("                <td><code>-</code></td>\n"); // Type (N/A for Macro)
+          // Macro Preview
           String macroSnippet = String(button.macroJson);
-          if (macroSnippet.length() > 30) {
-              macroSnippet = macroSnippet.substring(0, 27) + "...";
+          if (macroSnippet.length() > 50) { // Gekürzte Vorschau
+              macroSnippet = macroSnippet.substring(0, 47) + "...";
           }
-          response->print("                <td><code style='font-size: 0.8em;'>" + macroSnippet + "</code></td>\n"); // Macro Snippet
-          response->print("                <td><code>-</code></td>\n"); // Length N/A
-          response->print("                <td><code>-</code></td>\n"); // Address N/A
-          response->print("                <td><code>-</code></td>\n"); // Repeat N/A
-          response->print("                <td><code>-</code></td>\n"); // Out N/A
+          response->print("                <td><pre style='margin:0; padding: 2px; font-size: 0.9em;'>" + macroSnippet + "</pre></td>\n"); // Data/Macro Preview
+          response->print("                <td>Macro</td>\n"); // Mode
       } else {
           response->print("                <td><code>" + String(button.type) + "</code></td>\n"); // Type
-          response->print("                <td><code>" + String(button.data) + "</code></td>\n"); // Data
-          response->print("                <td><code>" + String(button.length) + "</code></td>\n"); // Length
-          response->print("                <td><code>" + (String(button.address).length() > 0 ? String(button.address) : "-") + "</code></td>\n"); // Address
-          response->print("                <td><code>" + String(button.repeat) + "</code></td>\n"); // Repeat
-          // Output Pin mit GPIO Info
-          String outText = String(button.out) + " (GPIO ";
-          switch(button.out) {
-              case 1: outText += String(pins1); break;
-              case 2: outText += String(pins2); break;
-              case 3: outText += String(pins3); break;
-              case 4: outText += String(pins4); break;
-              default: outText += "?"; break;
-          }
-          outText += ")";
-          response->print("                <td><code>" + outText + "</code></td>\n"); // Out
+          // Single IR Preview (kombiniert)
+          String singlePreview = "D:<code>" + String(button.data) + "</code> L:" + String(button.length) + " A:<code>" + (String(button.address).length() > 0 ? String(button.address) : "-") + "</code> R:" + String(button.repeat) + " O:" + String(button.out);
+          response->print("                <td>" + singlePreview + "</td>\n"); // Data/Macro Preview
+          response->print("                <td>Single IR</td>\n"); // Mode
       }
 
-      // Actions Spalte
+      // Actions Spalte (bleibt gleich)
       response->print("                <td>\n");
       response->print("                  <a href='/editbutton?id=" + String(i) + "' class='btn btn-xs btn-warning' style='margin-right: 3px;'>Edit</a>\n");
+      // Verwende POST für Delete, wenn möglich, aber behalte GET für jetzt bei, wie im bestehenden Code
       response->print("                  <a href='/deletebutton?id=" + String(i) + "' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure you want to delete button \\'" + String(button.name) + "\\'?\");'>Delete</a>\n");
       response->print("                </td>\n");
       response->print("              </tr>\n");
       yield(); // Wichtig bei vielen Buttons
     }
   } else {
-    response->print("              <tr><td colspan='11' class='text-center'><em>No active buttons configured.</em></td></tr>\n");
+    // --- KORRIGIERTER colspan ---
+    response->print("              <tr><td colspan='8' class='text-center'><em>No active buttons configured.</em></td></tr>\n"); // 8 Spalten
   }
 
   response->print("            </tbody>\n");
   response->print("          </table>\n");
-  // --- ENDE FEHLENDER TEIL ---
-
+  // --- ENDE KORRIGIERTE BUTTON-TABELLE ---
 
   // --- AKTIONEN (wie gehabt) ---
   response->print("          <a href='/addbutton' class='btn btn-success'>Add New Button</a>\n");
@@ -3001,6 +2982,7 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   sendFooter(response);
   request->send(response);
 }
+
 
 //+=============================================================================
 // Send header HTML (Async Version)
