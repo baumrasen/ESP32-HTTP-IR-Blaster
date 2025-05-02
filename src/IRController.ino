@@ -156,9 +156,9 @@ String normalizeHex(String hexStr) {
 }
 
 // +++ findMatchingButtonName (mit numerischem Adressvergleich) +++
-String findMatchingButtonName(const Code& codeToMatch) {
+const ButtonConfig* findMatchingButton(const Code& codeToMatch) {
   if (!codeToMatch.valid || strlen(codeToMatch.encoding) == 0 || strlen(codeToMatch.data) == 0 || codeToMatch.bits <= 0) {
-      return "";
+      return nullptr;
   }
 
   String codeTypeLower = String(codeToMatch.encoding);
@@ -212,7 +212,7 @@ String findMatchingButtonName(const Code& codeToMatch) {
 
           if (addressMatch) {
               // Serial.printf("      MATCH FOUND! Button: %s\n", button.name); // Debug
-              return String(button.name); // Treffer gefunden!
+              return &button; // Treffer gefunden!
           } else {
               // Serial.println("      Address mismatch prevented match."); // Debug
           }
@@ -220,7 +220,7 @@ String findMatchingButtonName(const Code& codeToMatch) {
   } // Ende for-Schleife
 
   // Serial.println("  No match found for this code."); // Debug
-  return ""; // Kein passender Button gefunden
+  return nullptr; // Kein passender Button gefunden
 }
 
 
@@ -492,7 +492,15 @@ void sendCodeUpdateEvent(const char* eventName, const Code& code) {
     jsonDoc["repeat"] = code.repeat;
     jsonDoc["out"] = code.out;
     jsonDoc["timestamp"] = epochToString(code.timestamp);
-    jsonDoc["matchedButton"] = findMatchingButtonName(code);
+
+    const ButtonConfig* matchedButton = findMatchingButton(code); // <-- Aufruf der neuen Funktion
+    if (matchedButton != nullptr) {
+        jsonDoc["matchedButtonName"] = matchedButton->name;
+        jsonDoc["matchedButtonColor"] = matchedButton->colorClass; // Die Original-Klasse (z.B. btn-primary)
+    } else {
+        jsonDoc["matchedButtonName"] = ""; // Leerer String, wenn kein Match
+        jsonDoc["matchedButtonColor"] = ""; // Leerer String, wenn kein Match
+    }
 
     String jsonString;
     serializeJson(jsonDoc, jsonString);
@@ -1069,13 +1077,16 @@ void generateAndWriteJavaScript() {
   newJsContent += F("    newRowHtml += `<td><code>${codeData.out}</code></td>`;\n");
   newJsContent += F("  }\n");
   newJsContent += F("\n");
-  newJsContent += F("  // +++ ZELLE FÜR BUTTON MATCH +++\n");
+  newJsContent += F("  // +++ ANGEPASSTE ZELLE FÜR BUTTON MATCH +++\n");
   newJsContent += F("  let matchCell = '<td>-</td>'; // Default: Kein Match\n");
-  newJsContent += F("  if (codeData.matchedButton && codeData.matchedButton.length > 0) {\n");
-  newJsContent += F("      matchCell = `<td><span class='label label-info'>${codeData.matchedButton}</span></td>`;\n");
+  newJsContent += F("  // Prüfe, ob Name UND Farbe vorhanden sind\n");
+  newJsContent += F("  if (codeData.matchedButtonName && codeData.matchedButtonName.length > 0 && codeData.matchedButtonColor && codeData.matchedButtonColor.length > 0) {\n");
+  newJsContent += F("      // Leite Label-Klasse ab (ersetze btn- durch label-)\n");
+  newJsContent += F("      const labelClass = codeData.matchedButtonColor.replace('btn-', 'label-');\n");
+  newJsContent += F("      matchCell = `<td><span class='label ${labelClass}'>${codeData.matchedButtonName}</span></td>`;\n");
   newJsContent += F("  }\n");
   newJsContent += F("  newRowHtml += matchCell; // Füge die Match-Zelle hinzu\n");
-  newJsContent += F("  // +++ ENDE ZELLE +++\n");
+  newJsContent += F("  // +++ ENDE ANGEPASSTE ZELLE +++\n");
   newJsContent += F("\n");
   newJsContent += F("  newRowHtml += `</tr>`;\n");
   newJsContent += F("\n");
@@ -1086,14 +1097,6 @@ void generateAndWriteJavaScript() {
   newJsContent += F("  while (tableBody.rows.length > MAX_TABLE_ROWS) {\n");
   newJsContent += F("    tableBody.deleteRow(-1); // Letzte Zeile löschen\n");
   newJsContent += F("  }\n");
-  newJsContent += F("\n");
-  newJsContent += F("  // --- WICHTIG: Colspan im Platzhalter anpassen (falls er neu erstellt werden müsste) ---\n");
-  newJsContent += F("  // Diese Logik wird hier nicht direkt benötigt, aber wenn du Code hättest,\n");
-  newJsContent += F("  // der den Platzhalter wieder einfügt, müsstest du den colspan anpassen:\n");
-  newJsContent += F("  // const expectedColspan = isSentTable ? 8 : 6; // Anzahl Spalten\n");
-  newJsContent += F("  // if (tableBody.rows.length === 0) {\n");
-  newJsContent += F("  //    tableBody.innerHTML = `<tr id=\"${placeholderId}\"><td colspan=\"${expectedColspan}\" class=\"text-center\"><em>...</em></td></tr>`;\n");
-  newJsContent += F("  // }\n");
   newJsContent += F("}\n"); // Ende der addTableRow Funktion
   
   newJsContent += F("evtSource.addEventListener('codeSent', function(event) {\n");
@@ -3735,15 +3738,22 @@ response->print("      </div><hr />\n"); // Ende row (remote-buttons container)
   response->print("            <tbody id='sent-codes-body'>\n");
   auto generateSentRow = [&](const Code& code) {
       if (code.valid) {
-          String matchedButtonName = findMatchingButtonName(code);
-          String matchCell = "-";
-          if (!matchedButtonName.isEmpty()) {
-              matchCell = "<span class='label label-info'>" + matchedButtonName + "</span>";
+          const ButtonConfig* matchedButton = findMatchingButton(code); // <-- Aufruf der neuen Funktion
+          String matchCell = "<td>-</td>"; // Default
+          if (matchedButton != nullptr) {
+              // --- Bootstrap Label-Klasse aus Button-Klasse ableiten ---
+              // Bootstrap Labels verwenden label-primary, label-success etc.
+              String labelClass = String(matchedButton->colorClass);
+              labelClass.replace("btn-", "label-"); // Ersetze "btn-" durch "label-"
+              // --- Ende Ableitung ---
+              matchCell = "<td><span class='label " + labelClass + "'>" + String(matchedButton->name) + "</span></td>"; // <-- Verwende Name und abgeleitete Klasse
           }
-          String rowHtml = "              <tr class='text-uppercase'><td>" + epochToString(code.timestamp) + "</td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td><td><code>" + String(code.repeat) + "</code></td><td><code>" + String(code.out) + "</code></td><td>" + matchCell + "</td></tr>\n";
+          // Generiere die Zeile mit der (ggf. aktualisierten) matchCell
+          String rowHtml = "              <tr class='text-uppercase'><td>" + epochToString(code.timestamp) + "</td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td><td><code>" + String(code.repeat) + "</code></td><td><code>" + String(code.out) + "</code></td>" + matchCell + "</tr>\n"; // <-- matchCell am Ende
           response->print(rowHtml);
       }
   };
+
 
   generateSentRow(last_send);
   yield();
@@ -3776,12 +3786,15 @@ response->print("      </div><hr />\n"); // Ende row (remote-buttons container)
   response->print("            <tbody id='received-codes-body'>\n");
   auto generateReceivedRow = [&](const Code& code, int id) {
       if (code.valid) {
-          String matchedButtonName = findMatchingButtonName(code);
-          String matchCell = "-";
-          if (!matchedButtonName.isEmpty()) {
-              matchCell = "<span class='label label-info'>" + matchedButtonName + "</span>";
+          const ButtonConfig* matchedButton = findMatchingButton(code); // <-- Aufruf der neuen Funktion
+          String matchCell = "<td>-</td>"; // Default
+          if (matchedButton != nullptr) {
+              String labelClass = String(matchedButton->colorClass);
+              labelClass.replace("btn-", "label-");
+              matchCell = "<td><span class='label " + labelClass + "'>" + String(matchedButton->name) + "</span></td>"; // <-- Verwende Name und abgeleitete Klasse
           }
-          String rowHtml = "              <tr class='text-uppercase'><td><a href='/received?id=" + String(id) + "'>" + epochToString(code.timestamp) + "</a></td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td><td>" + matchCell + "</td></tr>\n";
+          // Generiere die Zeile mit der (ggf. aktualisierten) matchCell
+          String rowHtml = "              <tr class='text-uppercase'><td><a href='/received?id=" + String(id) + "'>" + epochToString(code.timestamp) + "</a></td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td>" + matchCell + "</tr>\n"; // <-- matchCell am Ende
           response->print(rowHtml);
       }
   };
