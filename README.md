@@ -13,7 +13,7 @@ I used VS Code with PlatformIO.
 
 # Example
 
-## Blumfeldt / Smart Beam
+## Blumfeldt / Cosmic Beam Smart
 
 <img width="250" src="https://raw.githubusercontent.com/baumrasen/ESP32-HTTP-IR-Blaster/refs/heads/master/remote_example.png">
 
