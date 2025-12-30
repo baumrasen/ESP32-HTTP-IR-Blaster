@@ -34,12 +34,12 @@ const unsigned int captureBufSize = 1024;                      // Size of the IR
 
 const bool toggleRC = true;                                    // Toggle RC signals every other transmission
 
-const uint16_t  pinr1 = 15;                                          // Receiving pin
-const uint16_t  pins1 = 13;                                           // Transmitting preset 1
+const uint16_t  pinr1 = 22;                                          // Receiving pin
+const uint16_t  pins1 = 21;                                          // Transmitting preset 1
 const uint16_t  configpin = 10;                                      // Reset Pin
 const uint16_t  pins2 = 5;                                           // Transmitting preset 2
 const uint16_t  pins3 = 12;                                          // Transmitting preset 3
-const uint16_t  pins4 = 4;                                          // Transmitting preset 4
+const uint16_t  pins4 = 4;                                           // Transmitting preset 4
 
 //+=============================================================================
 // User settings are above here
