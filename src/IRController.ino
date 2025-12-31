@@ -36,7 +36,7 @@ const bool toggleRC = true;                                    // Toggle RC sign
 
 const uint16_t  pinr1 = 22;                                          // Receiving pin
 const uint16_t  pins1 = 21;                                          // Transmitting preset 1
-const uint16_t  configpin = 10;                                      // Reset Pin
+const uint16_t  configpin = 0;                                       // Reset Pin (GPIO 10 is unsafe on ESP32, 0 is Boot button)
 const uint16_t  pins2 = 5;                                           // Transmitting preset 2
 const uint16_t  pins3 = 12;                                          // Transmitting preset 3
 const uint16_t  pins4 = 4;                                           // Transmitting preset 4
@@ -782,8 +782,8 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info){
   Serial.printf("[WiFi-event] event: %d\n", event);
 
   switch (event) {
-    case SYSTEM_EVENT_STA_DISCONNECTED: // Older Cores might use this enum name directly
-    // case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: // Newer Cores use this
+    // case SYSTEM_EVENT_STA_DISCONNECTED: // Older Cores might use this enum name directly
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: // Newer Cores use this
         Serial.println("Lost Wifi - WiFi station disconnected");
         Serial.printf("Reason: %d\n", info.wifi_sta_disconnected.reason);
         // reset and try again
@@ -895,10 +895,10 @@ bool setupWifi(bool resetConf) {
   // strncpy(host_name, custom_hostname.getValue(), 20);
   // strncpy(passcode, custom_passcode.getValue(), 20);
   // strncpy(port_str, custom_port.getValue(), 6);
-  strncpy(host_name, custom_hostname, 20);
-  strncpy(passcode, custom_passcode, 20);
-  strncpy(port_str, custom_port, 6);
-  port = atoi(port_str);
+  // strncpy(host_name, custom_hostname, 20);
+  // strncpy(passcode, custom_passcode, 20);
+  // strncpy(port_str, custom_port, 6);
+  // port = atoi(port_str);
 
   // --- PRÜFUNG ---
   port = atoi(port_str);
@@ -1671,6 +1671,14 @@ if (buttonId >= 0 && buttonId < buttonConfigs.size()) {
   Serial.printf("Error: Invalid button ID %d requested for deletion.\n", buttonId);
   request->redirect("/buttons?status=error_invalid_id");
 }
+}
+
+// Handler zum Löschen der gesamten Konfiguration
+void handleClearConfig(AsyncWebServerRequest *request) {
+  Serial.println("Connection received endpoint '/clearconfig' (GET)");
+  buttonConfigs.clear();
+  saveButtonConfig(); // Speichert leere Liste und aktualisiert JS
+  request->redirect("/?status=config_cleared");
 }
 
 void handleSaveButton(AsyncWebServerRequest *request) {
@@ -2789,6 +2797,7 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   server->on("/addbutton", HTTP_GET, handleAddButtonPage);       // Zeigt leeres Formular
   server->on("/editbutton", HTTP_GET, handleEditButtonPage);     // Zeigt befülltes Formular
   server->on("/deletebutton", HTTP_GET, handleDeleteButton);   // Löscht Button (GET für Einfachheit, POST wäre besser)
+  server->on("/clearconfig", HTTP_GET, handleClearConfig);     // Löscht alle Buttons
   server->on("/savebutton", HTTP_POST, handleSaveButton);
   server->on("/sendbutton", HTTP_GET, handleSendButton);
   server->on("/sendir", HTTP_POST, handleSendIr);
@@ -2999,6 +3008,18 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   response->print("              </div>");
   response->print("            </form>");
   response->print("          </div>");
+
+  response->print("          <div style='margin-bottom: 20px;'>");
+  response->print("            <h4>Restore Configuration from File:</h4>");
+  response->print("            <form method='POST' action='/restore' enctype='multipart/form-data' class='form-inline'>");
+  response->print("              <div class='form-group'>");
+  response->print("                <label class='sr-only'>File</label>");
+  response->print("                <input type='file' class='form-control' name='data' accept='.json' required>");
+  response->print("                <button type='submit' class='btn btn-warning' onclick='return confirm(\"Overwrite current configuration?\");'>Upload</button>");
+  response->print("              </div>");
+  response->print("            </form>");
+  response->print("          </div>");
+
   response->print("          <h4>Available Backups:</h4>");
   response->print("          <ul class='list-group'>");
   File backupDir = LittleFS.open("/backups");
@@ -3628,6 +3649,8 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 
   // Link zum Konfigurieren (bleibt gleich)
   response->print("          <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons / Send IR Code for testing</a>\n");
+  response->print("          <a href='/backup' class='btn btn-info' style='margin: 5px;'>Download Config</a>\n");
+  response->print("          <a href='/clearconfig' class='btn btn-danger' style='margin: 5px;' onclick='return confirm(\"Are you sure you want to delete ALL buttons? This cannot be undone.\");'>Clear Config</a>\n");
 
   response->print("        </div>\n"); // Ende col-md-12 (remote-buttons container)
   response->print("      </div><hr />\n"); // Ende row (remote-buttons container)
@@ -3646,6 +3669,8 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
         response->print("      <div class='row'><div class='col-md-12'><div class='alert alert-danger'><strong>Error!</strong> Invalid form data (e.g., length 0 or empty data).</div></div></div>\n");
       } else if (status == "buttons_saved") {
         response->print("      <div class='row'><div class='col-md-12'><div class='alert alert-success'><strong>Success!</strong> Button configuration saved.</div></div></div>\n");
+      } else if (status == "config_cleared") {
+        response->print("      <div class='row'><div class='col-md-12'><div class='alert alert-success'><strong>Success!</strong> Configuration cleared.</div></div></div>\n");
       }
     }
     // +++ ENDE Feedback +++
