@@ -1435,6 +1435,79 @@ void generateAndWriteJavaScript() {
   newJsContent += F("}\n");
   newJsContent += F("document.addEventListener('DOMContentLoaded', populateDropdowns);\n");
 
+  // --- NEU: Initial Log Table Population & Footer Rendering ---
+  newJsContent += F("\n/* --- Initial Log Table Population --- */\n");
+  newJsContent += F("function populateInitialTables() {\n");
+  newJsContent += F("  if (typeof initialSentCodes !== 'undefined' && initialSentCodes.length > 0) {\n");
+  newJsContent += F("    const sentBody = document.getElementById('sent-codes-body');\n");
+  newJsContent += F("    if(sentBody) sentBody.innerHTML = '';\n");
+  newJsContent += F("    initialSentCodes.forEach(code => addTableRow('sent-codes-body', code, true));\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("  if (typeof initialReceivedCodes !== 'undefined' && initialReceivedCodes.length > 0) {\n");
+  newJsContent += F("    const recvBody = document.getElementById('received-codes-body');\n");
+  newJsContent += F("    if(recvBody) recvBody.innerHTML = '';\n");
+  newJsContent += F("    initialReceivedCodes.forEach(code => addTableRow('received-codes-body', code, false));\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("}\n");
+  newJsContent += F("document.addEventListener('DOMContentLoaded', populateInitialTables);\n\n");
+
+  newJsContent += F("/* --- Footer Rendering --- */\n");
+  newJsContent += F("function renderFooter() {\n");
+  newJsContent += F("    const container = document.getElementById('footer-container');\n");
+  newJsContent += F("    if (!container || typeof footerData === 'undefined') return;\n");
+  newJsContent += F("    const row = document.createElement('div');\n");
+  newJsContent += F("    row.className = 'row';\n");
+  newJsContent += F("\n");
+  newJsContent += F("    const devCol = document.createElement('div');\n");
+  newJsContent += F("    devCol.className = 'col-md-4';\n");
+  newJsContent += F("    devCol.innerHTML = `\n");
+  newJsContent += F("        <h4>Device Information</h4>\n");
+  newJsContent += F("        <ul class='list-unstyled' style='font-size: 0.9em;'>\n");
+  newJsContent += F("            <li><strong>Hostname:</strong> <a href='http://${footerData.hostname}.local:${footerData.port}'>${footerData.hostname}.local:${footerData.port}</a></li>\n");
+  newJsContent += F("            <li><strong>Local IP:</strong> <a href='http://${footerData.local_ip}:${footerData.port}'>${footerData.local_ip}:${footerData.port}</a></li>\n");
+  newJsContent += F("            <li><strong>DNS IP:</strong> <a href='http://${footerData.dns_ip}'>${footerData.dns_ip}</a></li>\n");
+  newJsContent += F("            <li><strong>MAC Address:</strong> <code>${footerData.mac}</code></li>\n");
+  newJsContent += F("        </ul>`;\n");
+  newJsContent += F("    row.appendChild(devCol);\n");
+  newJsContent += F("\n");
+  newJsContent += F("    const pinCol = document.createElement('div');\n");
+  newJsContent += F("    pinCol.className = 'col-md-4';\n");
+  newJsContent += F("    pinCol.innerHTML = `\n");
+  newJsContent += F("        <h4>Pin Configuration</h4>\n");
+  newJsContent += F("        <ul class='list-unstyled' style='font-size: 0.9em;'>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.recv}</span> Receiving </li>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.send1}</span> Transmitter 1 </li>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.send2}</span> Transmitter 2 </li>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.send3}</span> Transmitter 3 </li>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.send4}</span> Transmitter 4 </li>\n");
+  newJsContent += F("        </ul>`;\n");
+  newJsContent += F("    row.appendChild(pinCol);\n");
+  newJsContent += F("\n");
+  newJsContent += F("    const memCol = document.createElement('div');\n");
+  newJsContent += F("    memCol.className = 'col-md-4';\n");
+  newJsContent += F("    let memHtml = '<h4>Memory Usage</h4>';\n");
+  newJsContent += F("    memHtml += `<table class='table table-condensed table-bordered' style='font-size: 0.8em;'>\n");
+  newJsContent += F("        <thead><tr><th>T</th><th>Used</th><th>Total</th><th>%</th><th>Graph</th></tr></thead>\n");
+  newJsContent += F("        <tbody>`;\n");
+  newJsContent += F("    const createBar = (pct) => {\n");
+  newJsContent += F("        let bar = ''; const filled = Math.round(pct / 100.0 * 10);\n");
+  newJsContent += F("        for (let i = 0; i < 10; i++) { bar += (i < filled) ? '=' : '-'; }\n");
+  newJsContent += F("        return bar;\n");
+  newJsContent += F("    };\n");
+  newJsContent += F("    const fs = footerData.memory.fs;\n");
+  newJsContent += F("    memHtml += `<tr><td>FS</td><td>${fs.used}K</td><td>${fs.total}K</td><td>${fs.pct}</td><td><samp>${createBar(fs.pct)}</samp></td></tr>`;\n");
+  newJsContent += F("    const app = footerData.memory.app;\n");
+  newJsContent += F("    memHtml += `<tr><td>App</td><td>${app.used}K</td><td>${app.total}K</td><td>${app.pct}</td><td><samp>${createBar(app.pct)}</samp></td></tr>`;\n");
+  newJsContent += F("    const ram = footerData.memory.ram;\n");
+  newJsContent += F("    memHtml += `<tr><td>RAM</td><td>${ram.used}K</td><td>${ram.total}K</td><td>${ram.pct}</td><td><samp>${createBar(ram.pct)}</samp></td></tr>`;\n");
+  newJsContent += F("    memHtml += '</tbody></table>';\n");
+  newJsContent += F("    memCol.innerHTML = memHtml;\n");
+  newJsContent += F("    row.appendChild(memCol);\n");
+  newJsContent += F("    container.innerHTML = '';\n");
+  newJsContent += F("    container.appendChild(row);\n");
+  newJsContent += F("}\n");
+  newJsContent += F("document.addEventListener('DOMContentLoaded', renderFooter);\n");
+
   // --- Ende Aufbau newJsContent ---
 
   // 2. Lese den VORHANDENEN Inhalt (falls Datei existiert)
@@ -3352,157 +3425,57 @@ void sendHeader(AsyncResponseStream *response) {
 // Send footer HTML (AsyncResponseStream Version) - DREI SPALTEN NEBENEINANDER
 void sendFooter(AsyncResponseStream *response) {
 
-  // --- Reihe 1: Device Info, Pin Config, Memory Usage (nebeneinander) ---
-  response->print("      <div class='row'>\n"); // <-- Die EINE Reihe für alle drei
-
-  // --- Spalte 1: Device Information ---
-  response->print("        <div class='col-md-4'>\n"); // <-- Spalte 1 (1/3 Breite)
-  response->print("          <h4>Device Information</h4>\n"); // Kleinere Überschrift (h4)
-  response->print("          <ul class='list-unstyled' style='font-size: 0.9em;'>\n"); // Kleinere Schrift
-
-  // Hostname Info
-  String hostInfo = "            <li><strong>Hostname:</strong> <a href='http://" + String(host_name) + ".local" + ":" + String(port_str) + "'>" + String(host_name) + ".local" + ":" + String(port_str) + "</a></li>\n";
-  response->print(hostInfo);
-
-  // Local IP Info
-  String localInfo = "            <li><strong>Local IP:</strong> <a href='http://" + WiFi.localIP().toString() + ":" + String(port_str) + "'>" + WiFi.localIP().toString() + ":" + String(port_str) + "</a></li>\n";
-  response->print(localInfo);
-
-  // DNS IP Info
-  String dnsInfo = "            <li><strong>DNS IP:</strong> <a href='http://" + WiFi.dnsIP().toString() + "'>" + WiFi.dnsIP().toString() + "</a></li>\n";
-  response->print(dnsInfo);
-
-  // MAC Address Info
-  String macInfo = "            <li><strong>MAC Address:</strong> <code>" + String(WiFi.macAddress()) + "</code></li>\n";
-  response->print(macInfo);
-
-  response->print("          </ul>\n");
-  response->print("        </div>\n"); // <-- Ende Spalte 1 (Device Info)
-
-  // --- Spalte 2: Pin Configuration ---
-  response->print("        <div class='col-md-4'>\n"); // <-- Spalte 2 (1/3 Breite)
-  response->print("          <h4>Pin Configuration</h4>\n"); // Kleinere Überschrift (h4)
-  response->print("          <ul class='list-unstyled' style='font-size: 0.9em;'>\n"); // Kleinere Schrift
-  response->print("            <li><span class='badge'>GPIO " + String(pinr1) + "</span> Receiving </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins1) + "</span> Transmitter 1 </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins2) + "</span> Transmitter 2 </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins3) + "</span> Transmitter 3 </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins4) + "</span> Transmitter 4 </li></ul>\n");
-  response->print("        </div>\n"); // <-- Ende Spalte 2 (Pin Config)
-
-  // --- Spalte 3: Memory Usage ---
-  response->print("        <div class='col-md-4'>\n"); // <-- Spalte 3 (1/3 Breite)
-  response->print("          <h4>Memory Usage</h4>\n"); // Kleinere Überschrift (h4)
-
-  // --- Variablen und Berechnungen für Memory Usage (innerhalb der Spalte) ---
+  // --- Daten für JS sammeln ---
   char buffer[60];
-  int barWidth = 10; // Schmalere Balken für weniger Platz
-
-  // --- LittleFS ---
   uint32_t totalBytesFS = 0;
   uint32_t usedBytesFS = 0;
   float percentFS = 0;
   float usedKB_fs = 0;
-  String bar_fs = "";
-  String fsStatus = "OK";
   totalBytesFS = LittleFS.totalBytes();
   usedBytesFS = LittleFS.usedBytes();
-  if (totalBytesFS > 0) {
-      percentFS = (float)usedBytesFS / totalBytesFS * 100.0;
-      usedKB_fs = (float)usedBytesFS / 1024.0;
-      int filled = round(percentFS / 100.0 * barWidth);
-      for (int i = 0; i < barWidth; i++) { bar_fs += (i < filled) ? "=" : "-"; }
-  } else { fsStatus = "Size Error"; }
+  if (totalBytesFS > 0) { percentFS = (float)usedBytesFS / totalBytesFS * 100.0; usedKB_fs = (float)usedBytesFS / 1024.0; }
 
-  // --- Flash (Sketch) ---
   uint32_t sketchSize = ESP.getSketchSize();
   const esp_partition_t* running = esp_ota_get_running_partition();
   uint32_t totalSketchPartitionSize = 0;
   float percentFlash = 0;
   float usedKB_flash = 0;
-  String bar_flash = "";
-  String flashStatus = "OK";
   if (running != NULL) {
       totalSketchPartitionSize = running->size;
-      if (totalSketchPartitionSize > 0) {
-          percentFlash = (float)sketchSize / totalSketchPartitionSize * 100.0;
-          usedKB_flash = (float)sketchSize / 1024.0;
-          int filled = round(percentFlash / 100.0 * barWidth);
-          for (int i = 0; i < barWidth; i++) { bar_flash += (i < filled) ? "=" : "-"; }
-      } else { flashStatus = "Size Error"; }
-  } else { flashStatus = "Partition Error"; }
+      if (totalSketchPartitionSize > 0) { percentFlash = (float)sketchSize / totalSketchPartitionSize * 100.0; usedKB_flash = (float)sketchSize / 1024.0; }
+  }
 
-  // --- Heap (RAM) ---
   uint32_t totalHeap = ESP.getHeapSize();
   uint32_t freeHeap = ESP.getFreeHeap();
   uint32_t usedHeap = totalHeap - freeHeap;
   float percentHeap = 0;
   float usedKB_heap = 0;
-  String bar_heap = "";
-  if (totalHeap > 0) {
-      percentHeap = (float)usedHeap / totalHeap * 100.0;
-      usedKB_heap = (float)usedHeap / 1024.0;
-      int filled = round(percentHeap / 100.0 * barWidth);
-      for (int i = 0; i < barWidth; i++) { bar_heap += (i < filled) ? "=" : "-"; }
-  }
-  // --- ENDE Memory Usage Variablen & Berechnungen ---
+  if (totalHeap > 0) { percentHeap = (float)usedHeap / totalHeap * 100.0; usedKB_heap = (float)usedHeap / 1024.0; }
 
-  // --- Memory Usage Tabelle HTML (innerhalb der Spalte, noch kompakter) ---
-  response->print("          <table class='table table-condensed table-bordered' style='font-size: 0.8em;'>\n"); // Noch kleinere Schrift
-  response->print("            <thead>\n");
-  response->print("              <tr><th>T</th><th>Used</th><th>Total</th><th>%</th><th>Graph</th></tr>\n"); // Sehr kurze Header
-  response->print("            </thead>\n");
-  response->print("            <tbody>\n");
+  response->print("<script>\nconst footerData = {");
+  response->print("hostname:\""); response->print(host_name); response->print("\",");
+  response->print("port:\""); response->print(port_str); response->print("\",");
+  response->print("local_ip:\""); response->print(WiFi.localIP().toString()); response->print("\",");
+  response->print("dns_ip:\""); response->print(WiFi.dnsIP().toString()); response->print("\",");
+  response->print("mac:\""); response->print(WiFi.macAddress()); response->print("\",");
+  response->print("pins:{recv:"); response->print(pinr1);
+  response->print(",send1:"); response->print(pins1);
+  response->print(",send2:"); response->print(pins2);
+  response->print(",send3:"); response->print(pins3);
+  response->print(",send4:"); response->print(pins4);
+  response->print("},memory:{");
+  response->print("fs:{used:"); snprintf(buffer, sizeof(buffer), "%.0f", usedKB_fs); response->print(buffer);
+  response->print(",total:"); snprintf(buffer, sizeof(buffer), "%.0f", (float)totalBytesFS / 1024.0); response->print(buffer);
+  response->print(",pct:"); snprintf(buffer, sizeof(buffer), "%.0f", percentFS); response->print(buffer);
+  response->print("},app:{used:"); snprintf(buffer, sizeof(buffer), "%.0f", usedKB_flash); response->print(buffer);
+  response->print(",total:"); snprintf(buffer, sizeof(buffer), "%.0f", (float)totalSketchPartitionSize / 1024.0); response->print(buffer);
+  response->print(",pct:"); snprintf(buffer, sizeof(buffer), "%.0f", percentFlash); response->print(buffer);
+  response->print("},ram:{used:"); snprintf(buffer, sizeof(buffer), "%.0f", usedKB_heap); response->print(buffer);
+  response->print(",total:"); snprintf(buffer, sizeof(buffer), "%.0f", (float)totalHeap / 1024.0); response->print(buffer);
+  response->print(",pct:"); snprintf(buffer, sizeof(buffer), "%.0f", percentHeap); response->print(buffer);
+  response->print("}}};\n</script>\n");
 
-  // --- LittleFS Zeile ---
-  response->print("              <tr>\n");
-  response->print("                <td>FS</td>\n");
-  if (fsStatus == "OK" && totalBytesFS > 0) {
-      snprintf(buffer, sizeof(buffer), "%.0fK", usedKB_fs); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0fK", (float)totalBytesFS / 1024.0); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0f", percentFS); // Keine Nachkommastelle, kein %
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      response->print("                <td><samp>" + bar_fs + "</samp></td>\n");
-  } else { response->print("                <td colspan='4' class='text-danger'>" + fsStatus + "</td>\n"); }
-  response->print("              </tr>\n");
-
-  // --- Flash (Sketch) Zeile ---
-  response->print("              <tr>\n");
-  response->print("                <td>App</td>\n");
-  if (flashStatus == "OK" && totalSketchPartitionSize > 0) {
-      snprintf(buffer, sizeof(buffer), "%.0fK", usedKB_flash); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0fK", (float)totalSketchPartitionSize / 1024.0); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0f", percentFlash); // Keine Nachkommastelle, kein %
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      response->print("                <td><samp>" + bar_flash + "</samp></td>\n");
-  } else { response->print("                <td colspan='4' class='text-danger'>" + flashStatus + "</td>\n"); }
-  response->print("              </tr>\n");
-
-  // --- Heap (RAM) Zeile ---
-  response->print("              <tr>\n");
-  response->print("                <td>RAM</td>\n");
-  if (totalHeap > 0) {
-      snprintf(buffer, sizeof(buffer), "%.0fK", usedKB_heap); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0fK", (float)totalHeap / 1024.0); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0f", percentHeap); // Keine Nachkommastelle, kein %
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      response->print("                <td><samp>" + bar_heap + "</samp></td>\n");
-  } else { response->print("                <td colspan='4' class='text-danger'>N/A</td>\n"); }
-  response->print("              </tr>\n");
-
-  // --- Tabelle beenden ---
-  response->print("            </tbody>\n");
-  response->print("          </table>\n");
-  // --- ENDE Memory Usage Tabelle HTML ---
-
-  response->print("        </div>\n"); // <-- Ende Spalte 3 (Memory Usage)
-  response->print("      </div>\n");   // <-- Ende der EINEN Reihe
+  response->print("      <div id='footer-container'><div class='row'><div class='col-md-12 text-center'><em>Loading footer...</em></div></div></div>\n");
   response->print("      <hr />\n");   // <-- Trennlinie NACH der 3-Spalten-Reihe
 
   // --- Uptime and Epoch (bleibt darunter in eigener Reihe) ---
@@ -3549,6 +3522,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 
 // Hauptfunktion, die die Arbeit macht (AsyncResponseStream Version)
 void sendHomePage(AsyncWebServerRequest *request, String message, String header, int type, int httpcode) {
+
 
   yield(); // <--- Yield IMMEDIATELY upon entry
 
@@ -3639,6 +3613,51 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   if (type == 3)
     response->print("      <div class='row'><div class='col-md-12'><div class='alert alert-danger'><strong>" + header + "!</strong> " + message + "</div></div></div>\n");
 
+  // --- Initial Log Data for JS ---
+  auto serializeCodeToJson = [&](const Code& code) {
+    if (!code.valid) return String("");
+    String json = "{";
+    json += "\"timestamp\":\"" + epochToString(code.timestamp) + "\",";
+    json += "\"data\":\"" + String(code.data) + "\",";
+    json += "\"encoding\":\"" + String(code.encoding) + "\",";
+    json += "\"bits\":" + String(code.bits) + ",";
+    json += "\"address\":\"" + String(code.address) + "\",";
+    json += "\"repeat\":" + String(code.repeat) + ",";
+    json += "\"out\":" + String(code.out);
+    const ButtonConfig* matchedButton = findMatchingButton(code);
+    if (matchedButton) {
+      String safeName = String(matchedButton->name);
+      safeName.replace("\"", "\\\"");
+      json += ",\"matchedButtonName\":\"" + safeName + "\"";
+      json += ",\"matchedButtonColor\":\"" + String(matchedButton->colorClass) + "\"";
+    }
+    json += "}";
+    return json;
+  };
+
+  response->print("<script>\n");
+  response->print("const initialSentCodes = [");
+  const Code* sentCodes[] = {&last_send, &last_send_2, &last_send_3, &last_send_4, &last_send_5};
+  bool first = true;
+  for (const auto& codePtr : sentCodes) {
+    if (codePtr->valid) {
+      if (!first) response->print(",");
+      response->print(serializeCodeToJson(*codePtr));
+      first = false;
+    }
+  }
+  response->print("];\nconst initialReceivedCodes = [");
+  const Code* recvCodes[] = {&last_recv, &last_recv_2, &last_recv_3, &last_recv_4, &last_recv_5};
+  first = true;
+  for (const auto& codePtr : recvCodes) {
+    if (codePtr->valid) {
+      if (!first) response->print(",");
+      response->print(serializeCodeToJson(*codePtr));
+      first = false;
+    }
+  }
+  response->print("];\n</script>\n");
+
   // --- Codes Transmitted Table ---
   response->print("      <div class='row'>\n");
   response->print("        <div class='col-md-12'>\n");
@@ -3646,54 +3665,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("          <table class='table table-striped' style='table-layout: fixed;'>\n");
   response->print("            <thead><tr><th>Sent</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Button Match</th></tr></thead>\n");
   response->print("            <tbody id='sent-codes-body'>\n");
-  auto generateSentRow = [&](const Code& code) {
-      if (code.valid) {
-          const ButtonConfig* matchedButton = findMatchingButton(code); // <-- Aufruf der neuen Funktion
-          // String matchCell = "<td>-</td>"; // Default - String vermeiden
-          if (matchedButton != nullptr) {
-              // --- Bootstrap Label-Klasse aus Button-Klasse ableiten ---
-              // Bootstrap Labels verwenden label-primary, label-success etc.
-              String labelClass = String(matchedButton->colorClass);
-              labelClass.replace("btn-", "label-"); // Ersetze "btn-" durch "label-"
-              // --- Ende Ableitung ---
-              // matchCell = "<td><span class='label " + labelClass + "'>" + String(matchedButton->name) + "</span></td>"; // <-- Verwende Name und abgeleitete Klasse
-          }
-          // Generiere die Zeile mit der (ggf. aktualisierten) matchCell
-          response->print("              <tr class='text-uppercase'><td>"); response->print(epochToString(code.timestamp));
-          response->print("</td><td><code>"); response->print(code.data);
-          response->print("</code></td><td><code>"); response->print(code.encoding);
-          response->print("</code></td><td><code>"); response->print(code.bits);
-          response->print("</code></td><td><code>"); response->print(code.address);
-          response->print("</code></td><td><code>"); response->print(code.repeat);
-          response->print("</code></td><td><code>"); response->print(code.out);
-          response->print("</code></td>");
-          if (matchedButton != nullptr) {
-              String labelClass = String(matchedButton->colorClass); labelClass.replace("btn-", "label-");
-              response->print("<td><span class='label "); response->print(labelClass); response->print("'>"); response->print(matchedButton->name); response->print("</span></td>");
-          } else {
-              response->print("<td>-</td>");
-          }
-          response->print("</tr>\n");
-      }
-  };
-
-
-  generateSentRow(last_send);
-  yield();
-  generateSentRow(last_send_2);
-  yield(); 
-  generateSentRow(last_send_3);
-  yield();
-  generateSentRow(last_send_4);
-  yield();
-  generateSentRow(last_send_5);
-  yield(); 
-
-  // --- Add Log after lambda calls ---
-  // Serial.println("    Finished generating Sent Codes rows.");
-
   // Platzhalterzeile mit ID versehen
-  if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
   response->print("              <tr id='no-sent-codes'><td colspan='8' class='text-center'><em>No codes sent</em></td></tr>"); // <-- colspan="8"
   response->print("            </tbody></table>\n");
   response->print("          </div></div>\n");
@@ -3707,53 +3679,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("          <table class='table table-striped' style='table-layout: fixed;'>\n");
   response->print("            <thead><tr><th>Received</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th><th>Button Match</th></tr></thead>\n");
   response->print("            <tbody id='received-codes-body'>\n");
-  auto generateReceivedRow = [&](const Code& code, int id) {
-      if (code.valid) {
-          const ButtonConfig* matchedButton = findMatchingButton(code);
-          
-          response->print("              <tr class='text-uppercase'><td><a href='/received?id="); response->print(id); response->print("'>"); response->print(epochToString(code.timestamp));
-          response->print("</a></td><td><code>"); response->print(code.data);
-          response->print("</code></td><td><code>"); response->print(code.encoding);
-          response->print("</code></td><td><code>"); response->print(code.bits);
-          response->print("</code></td><td><code>"); response->print(code.address);
-          response->print("</code></td>");
-
-          if (matchedButton != nullptr) {
-              // --- Match gefunden: Farbigen Label anzeigen ---
-              String labelClass = String(matchedButton->colorClass);
-              labelClass.replace("btn-", "label-");
-              response->print("<td><span class='label "); response->print(labelClass); response->print("'>"); response->print(matchedButton->name); response->print("</span></td>");
-          } else {
-              // --- KEIN Match gefunden: "Create Button"-Link anzeigen ---
-              // Baue die URL mit Prefill-Parametern
-              response->print("<td><a href='/addbutton?prefill_type="); response->print(code.encoding);
-              response->print("&prefill_data="); response->print(code.data);
-              response->print("&prefill_length="); response->print(code.bits);
-              
-              // Adresse nur hinzufügen, wenn sie nicht "0x0" oder leer ist (optional, aber sauberer)
-              String normAddr = normalizeHex(String(code.address));
-              if (normAddr.length() > 0 && normAddr != "0") {
-                 response->print("&prefill_address="); response->print(code.address);
-              }
-              
-              response->print("' class='btn btn-xs btn-success' title='Create button from this code'>🆕 Create Button</a></td>");
-          }
-          response->print("</tr>\n");
-      }
-  };
-  generateReceivedRow(last_recv, 1);
-  yield();
-  generateReceivedRow(last_recv_2, 2);
-  yield();
-  generateReceivedRow(last_recv_3, 3);
-  yield();
-  generateReceivedRow(last_recv_4, 4);
-  yield();
-  generateReceivedRow(last_recv_5, 5);
-  yield();
-
   // Platzhalterzeile mit ID versehen
-  if (!last_recv.valid && !last_recv_2.valid && !last_recv_3.valid && !last_recv_4.valid && !last_recv_5.valid)
   response->print("              <tr id='no-received-codes'><td colspan='6' class='text-center'><em>No codes received</em></td></tr>"); // <-- colspan="6"
   response->print("            </tbody></table>\n");
   response->print("          </div></div><hr />\n");
