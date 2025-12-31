@@ -3008,6 +3008,18 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   response->print("              </div>");
   response->print("            </form>");
   response->print("          </div>");
+
+  response->print("          <div style='margin-bottom: 20px;'>");
+  response->print("            <h4>Restore Configuration from File:</h4>");
+  response->print("            <form method='POST' action='/restore' enctype='multipart/form-data' class='form-inline'>");
+  response->print("              <div class='form-group'>");
+  response->print("                <label class='sr-only'>File</label>");
+  response->print("                <input type='file' class='form-control' name='data' accept='.json' required>");
+  response->print("                <button type='submit' class='btn btn-warning' onclick='return confirm(\"Overwrite current configuration?\");'>Upload</button>");
+  response->print("              </div>");
+  response->print("            </form>");
+  response->print("          </div>");
+
   response->print("          <h4>Available Backups:</h4>");
   response->print("          <ul class='list-group'>");
   File backupDir = LittleFS.open("/backups");
