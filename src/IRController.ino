@@ -1280,11 +1280,23 @@ void generateAndWriteJavaScript() {
   newJsContent += F("  }\n");
   newJsContent += F("  configButtonsData.forEach((btn, index) => {\n");
   newJsContent += F("    const row = document.createElement('tr');\n");
+  newJsContent += F("    row.draggable = true;\n");
+  newJsContent += F("    row.addEventListener('dragstart', handleDragStart);\n");
+  newJsContent += F("    row.addEventListener('dragover', handleDragOver);\n");
+  newJsContent += F("    row.addEventListener('dragenter', handleDragEnter);\n");
+  newJsContent += F("    row.addEventListener('dragleave', handleDragLeave);\n");
+  newJsContent += F("    row.addEventListener('drop', handleDrop);\n");
+  newJsContent += F("    row.addEventListener('dragend', handleDragEnd);\n");
+
   newJsContent += F("    const addCell = (html) => { const td = document.createElement('td'); td.innerHTML = html; row.appendChild(td); };\n");
   newJsContent += F("    addCell(index);\n");
-  newJsContent += F("    addCell(btn.name);\n");
-  newJsContent += F("    addCell(btn.row);\n");
-  newJsContent += F("    addCell(btn.col);\n");
+  
+  newJsContent += F("    const nameTd = document.createElement('td'); nameTd.innerText = btn.name; makeEditable(nameTd, index, 'btn_name', 'text'); row.appendChild(nameTd);\n");
+  
+  newJsContent += F("    const rowTd = document.createElement('td'); rowTd.innerText = btn.row; makeEditable(rowTd, index, 'btn_layoutRow', 'number'); row.appendChild(rowTd);\n");
+  
+  newJsContent += F("    const colTd = document.createElement('td'); colTd.innerText = btn.col; makeEditable(colTd, index, 'btn_layoutCol', 'number'); row.appendChild(colTd);\n");
+
   newJsContent += F("    addCell(`<span class='label ${btn.color}'>${btn.color}</span>`);\n");
   newJsContent += F("    if (btn.macro) {\n");
   newJsContent += F("        addCell('<code>-</code>');\n");
@@ -1307,6 +1319,95 @@ void generateAndWriteJavaScript() {
   newJsContent += F("  });\n");
   newJsContent += F("}\n");
   newJsContent += F("document.addEventListener('DOMContentLoaded', renderConfigTable);\n");
+
+  newJsContent += F("/* --- Drag & Drop Reordering --- */\n");
+  newJsContent += F("/* CSS Injection */\n");
+  newJsContent += F("const style = document.createElement('style');\n");
+  newJsContent += F("style.innerHTML = `\n");
+  newJsContent += F("  .drag-source { opacity: 0.4; }\n");
+  newJsContent += F("  .drag-over { border-top: 2px solid #337ab7; }\n");
+  newJsContent += F("  tr[draggable=true] { cursor: move; }\n");
+  newJsContent += F("`;\n");
+  newJsContent += F("document.head.appendChild(style);\n\n");
+
+  newJsContent += F("let dragSrcEl = null;\n");
+  newJsContent += F("function handleDragStart(e) {\n");
+  newJsContent += F("  dragSrcEl = this;\n");
+  newJsContent += F("  e.dataTransfer.effectAllowed = 'move';\n");
+  newJsContent += F("  e.dataTransfer.setData('text/html', this.innerHTML);\n");
+  newJsContent += F("  this.classList.add('drag-source');\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDragOver(e) {\n");
+  newJsContent += F("  if (e.preventDefault) e.preventDefault();\n");
+  newJsContent += F("  e.dataTransfer.dropEffect = 'move';\n");
+  newJsContent += F("  return false;\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDragEnter(e) {\n");
+  newJsContent += F("  this.classList.add('drag-over');\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDragLeave(e) {\n");
+  newJsContent += F("  this.classList.remove('drag-over');\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDrop(e) {\n");
+  newJsContent += F("  if (e.stopPropagation) e.stopPropagation();\n");
+  newJsContent += F("  if (dragSrcEl !== this) {\n");
+  newJsContent += F("    const srcIdx = parseInt(dragSrcEl.cells[0].innerText);\n");
+  newJsContent += F("    const dstIdx = parseInt(this.cells[0].innerText);\n");
+  newJsContent += F("    const formData = new URLSearchParams();\n");
+  newJsContent += F("    formData.append('src', srcIdx);\n");
+  newJsContent += F("    formData.append('dst', dstIdx);\n");
+  newJsContent += F("    fetch('/reorderbuttons', { method: 'POST', body: formData })\n");
+  newJsContent += F("    .then(res => {\n");
+  newJsContent += F("      if(res.ok) location.reload();\n");
+  newJsContent += F("      else alert('Reorder failed');\n");
+  newJsContent += F("    });\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("  return false;\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDragEnd(e) {\n");
+  newJsContent += F("  this.classList.remove('drag-source');\n");
+  newJsContent += F("  document.querySelectorAll('#config-buttons-table-body tr').forEach(row => row.classList.remove('drag-over'));\n");
+  newJsContent += F("}\n");
+
+  newJsContent += F("/* --- Inline Editing --- */\n");
+  newJsContent += F("function makeEditable(cell, id, field, type) {\n");
+  newJsContent += F("  cell.style.cursor = 'pointer';\n");
+  newJsContent += F("  cell.title = 'Click to edit';\n");
+  newJsContent += F("  cell.onclick = function(e) {\n");
+  newJsContent += F("    if (this.hasAttribute('data-editing')) return;\n");
+  newJsContent += F("    e.stopPropagation();\n");
+  newJsContent += F("    this.setAttribute('data-editing', 'true');\n");
+  newJsContent += F("    const oldVal = this.innerText;\n");
+  newJsContent += F("    const input = document.createElement('input');\n");
+  newJsContent += F("    input.type = type;\n");
+  newJsContent += F("    input.value = oldVal;\n");
+  newJsContent += F("    input.style.width = '100%';\n");
+  newJsContent += F("    input.className = 'form-control input-sm';\n");
+  newJsContent += F("    input.onblur = function() { saveCellEdit(cell, id, field, this.value, oldVal); };\n");
+  newJsContent += F("    input.onkeydown = function(e) { if(e.key === 'Enter') this.blur(); if(e.key === 'Escape') { cell.innerText = oldVal; cell.removeAttribute('data-editing'); } };\n");
+  newJsContent += F("    this.innerHTML = '';\n");
+  newJsContent += F("    this.appendChild(input);\n");
+  newJsContent += F("    input.focus();\n");
+  newJsContent += F("  };\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function saveCellEdit(cell, id, field, newVal, oldVal) {\n");
+  newJsContent += F("  if (newVal === oldVal) { cell.innerText = oldVal; cell.removeAttribute('data-editing'); return; }\n");
+  newJsContent += F("  const formData = new URLSearchParams();\n");
+  newJsContent += F("  formData.append('button_id', id);\n");
+  newJsContent += F("  formData.append(field, newVal);\n");
+  newJsContent += F("  fetch('/savebutton', { method: 'POST', body: formData })\n");
+  newJsContent += F("  .then(res => {\n");
+  newJsContent += F("    if (res.ok) {\n");
+  newJsContent += F("      cell.innerText = newVal;\n");
+  newJsContent += F("      if (field.includes('layout')) location.reload();\n"); // Reload bei Layout-Änderung für Grid-Update
+  newJsContent += F("    } else {\n");
+  newJsContent += F("      cell.innerText = oldVal;\n");
+  newJsContent += F("      alert('Error saving value');\n");
+  newJsContent += F("    }\n");
+  newJsContent += F("    cell.removeAttribute('data-editing');\n");
+  newJsContent += F("  })\n");
+  newJsContent += F("  .catch(e => { cell.innerText = oldVal; cell.removeAttribute('data-editing'); alert('Network error'); });\n");
+  newJsContent += F("}\n");
 
   newJsContent += F("/* --- Dropdown Population (Type & Out) --- */\n");
   newJsContent += F("function populateDropdowns() {\n");
@@ -1762,135 +1863,112 @@ void handleClearConfig(AsyncWebServerRequest *request) {
   request->redirect("/?status=config_cleared");
 }
 
+// Handler zum Ändern der Reihenfolge (Drag & Drop)
+void handleReorderButtons(AsyncWebServerRequest *request) {
+  Serial.println("Connection received endpoint '/reorderbuttons' (POST)");
+  if (request->hasParam("src", true) && request->hasParam("dst", true)) {
+      int srcIdx = request->getParam("src", true)->value().toInt();
+      int dstIdx = request->getParam("dst", true)->value().toInt();
+      
+      if (srcIdx >= 0 && srcIdx < buttonConfigs.size() && dstIdx >= 0 && dstIdx < buttonConfigs.size()) {
+          Serial.printf("  Moving button from %d to %d\n", srcIdx, dstIdx);
+          ButtonConfig temp = buttonConfigs[srcIdx];
+          buttonConfigs.erase(buttonConfigs.begin() + srcIdx);
+          buttonConfigs.insert(buttonConfigs.begin() + dstIdx, temp);
+          saveButtonConfig();
+          request->send(200, "text/plain", "OK");
+      } else {
+          request->send(400, "text/plain", "Invalid indices");
+      }
+  } else {
+      request->send(400, "text/plain", "Missing parameters");
+  }
+}
+
 void handleSaveButton(AsyncWebServerRequest *request) {
   Serial.println("==> handleSaveButton: Entered function.");
 
-  // -- manuell per Index suchen ---
-  int params = request->params();
-  Serial.printf("    Scanning %d parameters...\n", params);
-
-  // Lokale Variablen für die gelesenen Werte initialisieren
-  String buttonIdStr = ""; // ID als String lesen
-  String name = "";
-  String type = "";
-  String data = "";
-  String lengthStr = ""; // Länge als String lesen
-  String address = "";
-  String repeatStr = ""; // Repeat als String lesen
-  String outStr = "";    // Out als String lesen
-  String isMacroStr = "";
-  String macroJson = "";
-  String layoutRowStr = "";
-  String layoutColStr = "";
-  String colorClassStr = ""; // Für die Farbklasse
-  bool buttonIdFound = false;
-
-  for(int i=0; i<params; i++){
-    const AsyncWebParameter* p = request->getParam(i);
-    // Nur POST-Parameter berücksichtigen
-    if(p->isPost()){
-      String paramName = p->name(); // Namen holen
-      String paramValue = p->value(); // Wert holen
-      Serial.printf("      POST[%s]: %s\n", paramName.c_str(), paramValue.c_str()); // Debug
-
-      // Werte basierend auf dem Namen zuweisen
-      if (paramName.equals("button_id")) {
-        buttonIdStr = paramValue;
-        buttonIdFound = true;
-      } else if (paramName.equals("btn_name")) {
-        name = paramValue;
-      } 
-      // --- Makro-Felder lesen ---
-      else if (paramName.equals("btn_isMacro")) { isMacroStr = paramValue; }
-      else if (paramName.equals("btn_macroJson")) { macroJson = paramValue; }
-      
-      else if (paramName.equals("btn_type")) {
-        type = paramValue;
-      } else if (paramName.equals("btn_data")) {
-        data = paramValue;
-      } else if (paramName.equals("btn_length")) {
-        lengthStr = paramValue;
-      } else if (paramName.equals("btn_address")) {
-        address = paramValue;
-      } else if (paramName.equals("btn_repeat")) {
-        repeatStr = paramValue;
-      } else if (paramName.equals("btn_out")) {
-        outStr = paramValue;
-      } else if (paramName.equals("btn_layoutRow")) {
-        layoutRowStr = paramValue;
-      } else if (paramName.equals("btn_layoutCol")) {
-        layoutColStr = paramValue;
-      } else if (paramName.equals("btn_colorClass")) {
-        colorClassStr = paramValue;
-      }
-    } else {
-       Serial.printf("      Ignoring non-POST param[%s]: %s\n", p->name().c_str(), p->value().c_str());
-    }
-  }
-  Serial.println("    Parameter scan complete.");
-
-  // --- Prüfung, ob button_id gefunden wurde ---
-  if (!buttonIdFound) {
-      Serial.println("    ERROR: Parameter 'button_id' not found during manual scan!");
+  // 1. ID suchen
+  int buttonId = -1;
+  if (request->hasParam("button_id", true)) {
+      buttonId = request->getParam("button_id", true)->value().toInt();
+  } else {
+      Serial.println("    ERROR: Parameter 'button_id' not found!");
       request->redirect("/buttons?status=error_save");
       return;
   }
 
-  // --- Werte konvertieren ---
-  int buttonId = buttonIdStr.toInt();
-  bool isMacro = (isMacroStr == "1"); // Prüfe, ob der Wert "1" ist
-  int length = lengthStr.toInt();
-  int repeat = repeatStr.toInt();
-  int out = outStr.toInt();
-  // ... (andere Konvertierungen) ...
-  int layoutRow = layoutRowStr.toInt();
-  int layoutCol = layoutColStr.toInt();
-  // Konvertiere leere Eingaben oder 0 zu -1 für "nicht gesetzt"
-  if (layoutRowStr.length() == 0 || layoutRow < 0) layoutRow = -1;
-  if (layoutColStr.length() == 0 || layoutCol < 0) layoutCol = -1;
-  // Safety Clamp
-  if (layoutRow > 50) layoutRow = 50;
-  if (layoutCol > 10) layoutCol = 10;
-  
-  name.trim();  // Trimme den Namen
+  // 2. Basis-Konfiguration laden (Existierend oder Default)
+  ButtonConfig tempButton;
+  if (buttonId >= 0 && buttonId < buttonConfigs.size()) {
+      tempButton = buttonConfigs[buttonId]; // Kopiere existierende Daten (für partielle Updates)
+      Serial.printf("    Loaded existing config for ID %d.\n", buttonId);
+  } else {
+      // Defaults für neuen Button
+      tempButton.repeat = 1;
+      tempButton.out = 1;
+      strncpy(tempButton.colorClass, "btn-primary", sizeof(tempButton.colorClass)-1);
+      tempButton.layoutRow = -1;
+      tempButton.layoutCol = -1;
+      Serial.println("    Initialized default config for new button.");
+  }
 
-  Serial.println("--- Parameter Values ---");
-  Serial.println("buttonIdStr: " + buttonIdStr);
-  Serial.println("name: " + name);
-  Serial.println("isMacroStr: " + isMacroStr);
-  // Serial.println("macroJson (String): " + macroJson); // <-- DEAKTIVIERT: Zu viel Logging kann Absturz verursachen
-  Serial.println("type (String): " + type);
-  Serial.println("data (String): " + data);
-  Serial.println("lengthStr: " + lengthStr);
-  Serial.println("address (String): " + address);
-  Serial.println("repeatStr: " + repeatStr);
-  Serial.println("outStr: " + outStr);
-  Serial.println("layoutRowStr: " + layoutRowStr + " -> " + String(layoutRow));
-  Serial.println("layoutColStr: " + layoutColStr + " -> " + String(layoutCol));
-  Serial.println("colorClassStr: " + colorClassStr);
-  Serial.println("------------------------");
+  // 3. Parameter iterieren und tempButton aktualisieren (Partielles Update)
+  int params = request->params();
+  for(int i=0; i<params; i++){
+    const AsyncWebParameter* p = request->getParam(i);
+    if(p->isPost()){
+      String name = p->name();
+      String val = p->value();
+      
+      if (name == "btn_name") { strncpy(tempButton.name, val.c_str(), sizeof(tempButton.name)-1); tempButton.name[sizeof(tempButton.name)-1]=0; }
+      else if (name == "btn_layoutRow") { 
+          if (val.length() == 0) tempButton.layoutRow = -1; 
+          else tempButton.layoutRow = val.toInt(); 
+          if (tempButton.layoutRow < 0) tempButton.layoutRow = -1;
+          if (tempButton.layoutRow > 50) tempButton.layoutRow = 50; // Clamp
+      }
+      else if (name == "btn_layoutCol") { 
+          if (val.length() == 0) tempButton.layoutCol = -1; 
+          else tempButton.layoutCol = val.toInt();
+          if (tempButton.layoutCol < 0) tempButton.layoutCol = -1;
+          if (tempButton.layoutCol > 10) tempButton.layoutCol = 10; // Clamp
+      }
+      else if (name == "btn_colorClass") { strncpy(tempButton.colorClass, val.c_str(), sizeof(tempButton.colorClass)-1); tempButton.colorClass[sizeof(tempButton.colorClass)-1]=0; }
+      else if (name == "btn_isMacro") { tempButton.isMacro = (val == "1"); }
+      else if (name == "btn_macroJson") { strncpy(tempButton.macroJson, val.c_str(), sizeof(tempButton.macroJson)-1); tempButton.macroJson[sizeof(tempButton.macroJson)-1]=0; }
+      else if (name == "btn_type") { strncpy(tempButton.type, val.c_str(), sizeof(tempButton.type)-1); tempButton.type[sizeof(tempButton.type)-1]=0; }
+      else if (name == "btn_data") { strncpy(tempButton.data, val.c_str(), sizeof(tempButton.data)-1); tempButton.data[sizeof(tempButton.data)-1]=0; }
+      else if (name == "btn_length") { tempButton.length = val.toInt(); }
+      else if (name == "btn_address") { strncpy(tempButton.address, val.c_str(), sizeof(tempButton.address)-1); tempButton.address[sizeof(tempButton.address)-1]=0; }
+      else if (name == "btn_repeat") { tempButton.repeat = val.toInt(); if(tempButton.repeat <= 0) tempButton.repeat = 1; }
+      else if (name == "btn_out") { tempButton.out = val.toInt(); if(tempButton.out < 1 || tempButton.out > 4) tempButton.out = 1; }
+    }
+  }
 
-  // --- Validierung ---
+  // 4. Validierung
+  String nameStr = String(tempButton.name);
+  nameStr.trim();
+  strncpy(tempButton.name, nameStr.c_str(), sizeof(tempButton.name)-1);
+
   // 1. Name ist immer erforderlich
-  if (name.length() == 0) {
+  if (strlen(tempButton.name) == 0) {
     Serial.println("    ERROR: Validation failed! (Name is missing). Redirecting.");
     request->redirect("/buttons?status=error_invalid_data"); // Oder spezifischerer Status?
     return;
 }
 
 // 2. Spezifische Validierung basierend auf isMacro
-if (isMacro) {
-  Serial.println("    DEBUG: Vor strncpy für macroJson. Lokaler Wert:"); // NEU
-  Serial.println("    >>>> " + macroJson + " <<<<"); // NEU
+if (tempButton.isMacro) {
   // Validierung für Makro
-  if (macroJson.length() == 0) {
+  if (strlen(tempButton.macroJson) == 0) {
       Serial.println("    ERROR: Validation failed! (Macro JSON missing). Redirecting.");
       request->redirect("/buttons?status=error_invalid_macro_data"); // Status für Makro-Fehler
       return;
   }
   // JSON Validierung (wie gehabt)
   DynamicJsonDocument tempDoc(1024);
-  DeserializationError error = deserializeJson(tempDoc, macroJson);
+  DeserializationError error = deserializeJson(tempDoc, tempButton.macroJson);
   if (error) {
       Serial.print("    ERROR: Macro JSON validation failed: ");
       Serial.println(error.c_str());
@@ -1904,88 +1982,39 @@ if (isMacro) {
   }
   Serial.println("    Macro JSON validation passed.");
   // Single-IR Felder werden später ignoriert/geleert
-  type = ""; data = ""; length = 0; address = ""; repeat = 1; out = 1; // Setze hier schon Defaults/Leerwerte
+  tempButton.type[0] = 0; tempButton.data[0] = 0; tempButton.length = 0; 
+  tempButton.address[0] = 0; tempButton.repeat = 1; tempButton.out = 1;
 
   } else {
       // Validierung für Single IR (jetzt hier)
-      if (data.length() == 0 || length <= 0) {
+      if (strlen(tempButton.data) == 0 || tempButton.length <= 0) {
           Serial.println("    ERROR: Validation failed! (data or length invalid for single IR). Redirecting.");
           request->redirect("/buttons?status=error_invalid_data"); // Status passt hier
           return;
       }
-      // Defaults für Single IR (wie gehabt)
-      if (repeat <= 0) repeat = 1;
-      if (out <= 0 || out > 4) out = 1;
       // Makro-Feld wird später ignoriert/geleert
-      macroJson = ""; // Setze hier schon Leerwert
+      tempButton.macroJson[0] = 0;
       Serial.println("    Single IR validation passed.");
   }
 
   // --- Farbklasse validieren ---
   const char* validColors[] = {"btn-primary", "btn-success", "btn-info", "btn-warning", "btn-danger", "btn-default"};
   bool colorIsValid = false;
+  String colorStr = String(tempButton.colorClass);
   for (const char* validColor : validColors) {
-      if (colorClassStr.equalsIgnoreCase(validColor)) {
-          colorClassStr = validColor; // Stelle korrekte Schreibweise sicher
+      if (colorStr.equalsIgnoreCase(validColor)) {
+          strncpy(tempButton.colorClass, validColor, sizeof(tempButton.colorClass)-1); // Stelle korrekte Schreibweise sicher
           colorIsValid = true;
           break;
       }
   }
   if (!colorIsValid) {
-      Serial.println("    Warning: Invalid color class received ('" + colorClassStr + "'). Defaulting to btn-primary.");
-      colorClassStr = "btn-primary"; // Fallback auf Default
+      Serial.println("    Warning: Invalid color class. Defaulting to btn-primary.");
+      strncpy(tempButton.colorClass, "btn-primary", sizeof(tempButton.colorClass)-1);
   }
-  // --- Ende Farbklasse validieren ---
 
-  
-  // --- ENDE VALIDIERUNG ---
-
-  // Defaults setzen (redundant, da oben schon erledigt, aber schadet nicht)
-  if (repeat <= 0) repeat = 1;
-  if (out <= 0 || out > 4) out = 1;
-
- // --- Button-Daten vorbereiten ---
- ButtonConfig tempButton; // Temporäres Struct zum Befüllen
-
- // Gemeinsame Felder
- tempButton.configured = true;
- strncpy(tempButton.name, name.c_str(), sizeof(tempButton.name) - 1);
- tempButton.name[sizeof(tempButton.name) - 1] = '\0';
- tempButton.isMacro = isMacro;
- tempButton.layoutRow = layoutRow;
- tempButton.layoutCol = layoutCol;
- strncpy(tempButton.colorClass, colorClassStr.c_str(), sizeof(tempButton.colorClass) - 1);
- tempButton.colorClass[sizeof(tempButton.colorClass) - 1] = '\0';
-
-
- // Modus-spezifische Felder
- if (isMacro) {
-     // Makro-Daten kopieren
-     strncpy(tempButton.macroJson, macroJson.c_str(), sizeof(tempButton.macroJson) - 1);
-     tempButton.macroJson[sizeof(tempButton.macroJson) - 1] = '\0';
-     // Single-IR Felder leeren
-     tempButton.type[0] = '\0';
-     tempButton.data[0] = '\0';
-     tempButton.length = 0;
-     tempButton.address[0] = '\0';
-     tempButton.repeat = 1; // Default
-     tempButton.out = 1;    // Default
-     Serial.println("    Prepared tempButton for MACRO."); // Debug
- } else {
-     // Single-IR Daten kopieren
-     strncpy(tempButton.type, type.c_str(), sizeof(tempButton.type) - 1);
-     tempButton.type[sizeof(tempButton.type) - 1] = '\0';
-     strncpy(tempButton.data, data.c_str(), sizeof(tempButton.data) - 1);
-     tempButton.data[sizeof(tempButton.data) - 1] = '\0';
-     tempButton.length = length;
-     strncpy(tempButton.address, address.c_str(), sizeof(tempButton.address) - 1);
-     tempButton.address[sizeof(tempButton.address) - 1] = '\0';
-     tempButton.repeat = repeat;
-     tempButton.out = out;
-     // Makro-Feld leeren
-     tempButton.macroJson[0] = '\0';
-     Serial.println("    Prepared tempButton for SINGLE IR."); // Debug
- }
+  // Button ist konfiguriert
+  tempButton.configured = true;
 
  // --- Entscheiden: Add oder Edit ---
  if (buttonId == -1) { // Neuer Button
@@ -2878,6 +2907,7 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   server->on("/deletebutton", HTTP_GET, handleDeleteButton);   // Löscht Button (GET für Einfachheit, POST wäre besser)
   server->on("/clearconfig", HTTP_GET, handleClearConfig);     // Löscht alle Buttons
   server->on("/savebutton", HTTP_POST, handleSaveButton);
+  server->on("/reorderbuttons", HTTP_POST, handleReorderButtons); // Neuer Handler für Drag & Drop
   server->on("/sendbutton", HTTP_GET, handleSendButton);
   server->on("/sendir", HTTP_POST, handleSendIr);
 
