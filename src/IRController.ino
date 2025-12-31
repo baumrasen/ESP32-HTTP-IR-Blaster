@@ -1265,7 +1265,7 @@ void generateAndWriteJavaScript() {
   newJsContent += F("      noLayout.forEach(btn => { const el = createButtonElement(btn); el.style.margin = '5px'; colDiv.appendChild(el); });\n");
   newJsContent += F("      rowDiv.appendChild(colDiv); container.appendChild(rowDiv); container.appendChild(document.createElement('hr'));\n");
   newJsContent += F("  }\n");
-  newJsContent += F("  container.insertAdjacentHTML('beforeend', `<a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons / Send IR Code for testing</a><a href='/backup' class='btn btn-info' style='margin: 5px;'>Download Config</a><a href='/clearconfig' class='btn btn-danger' style='margin: 5px;' onclick='return confirm(\"Are you sure you want to delete ALL buttons? This cannot be undone.\");'>Clear Config</a>`);\n");
+  newJsContent += F("  container.insertAdjacentHTML('beforeend', `<h3>Configuration</h3><a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons / Send IR Code for testing</a><a href='/backup' class='btn btn-info' style='margin: 5px;'>Download Config</a><a href='/clearconfig' class='btn btn-danger' style='margin: 5px;' onclick='return confirm(\"Are you sure you want to delete ALL buttons? This cannot be undone.\");'>Clear Config</a>`);\n");
   newJsContent += F("}\n");
   newJsContent += F("document.addEventListener('DOMContentLoaded', renderButtons);\n");
 
@@ -3107,24 +3107,23 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
 
   // --- Backup/Restore Sektion ---
   response->print("          <hr><h2>Manage Configuration Backups</h2>");
-  response->print("          <div style='margin-bottom: 20px;'>");
-  response->print("            <h4>Save Current Configuration As:</h4>");
-  response->print("            <form method='POST' action='/savebackup' class='form-inline'>");
+  response->print("          <div class='well'>");
+  
+  // Save Backup Form
+  response->print("            <form method='POST' action='/savebackup' class='form-inline' style='display: inline-block; margin-right: 10px; margin-bottom: 5px;'>");
   response->print("              <div class='form-group'>");
-  response->print("                <label for='backup_name' class='sr-only'>Backup Name</label>");
-  response->print("                <input type='text' class='form-control' id='backup_name' name='backup_name' placeholder='e.g., living_room_setup' required>");
+  response->print("                <input type='text' class='form-control' name='backup_name' placeholder='Backup Name' required style='width: 150px;'>");
   response->print("                <button type='submit' class='btn btn-primary'>Save Backup</button>");
-  response->print("                <a href='/backup' class='btn btn-info'>Download Active Config (buttons.json)</a>");
   response->print("              </div>");
   response->print("            </form>");
-  response->print("          </div>");
 
-  response->print("          <div style='margin-bottom: 20px;'>");
-  response->print("            <h4>Restore Configuration from File:</h4>");
-  response->print("            <form method='POST' action='/restore' enctype='multipart/form-data' class='form-inline'>");
+  // Download Link
+  response->print("            <a href='/backup' class='btn btn-info' style='margin-right: 10px; margin-bottom: 5px;'>Download Config</a>");
+
+  // Restore Form
+  response->print("            <form method='POST' action='/restore' enctype='multipart/form-data' class='form-inline' style='display: inline-block; margin-bottom: 5px;'>");
   response->print("              <div class='form-group'>");
-  response->print("                <label class='sr-only'>File</label>");
-  response->print("                <input type='file' class='form-control' name='data' accept='.json' required>");
+  response->print("                <input type='file' class='form-control' name='data' accept='.json' required style='display: inline-block; width: auto;'>");
   response->print("                <button type='submit' class='btn btn-warning' onclick='return confirm(\"Overwrite current configuration?\");'>Upload</button>");
   response->print("              </div>");
   response->print("            </form>");
