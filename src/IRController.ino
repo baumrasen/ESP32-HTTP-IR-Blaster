@@ -1297,7 +1297,8 @@ void generateAndWriteJavaScript() {
   
   newJsContent += F("    const colTd = document.createElement('td'); colTd.innerText = btn.col; makeEditable(colTd, index, 'btn_layoutCol', 'number'); row.appendChild(colTd);\n");
 
-  newJsContent += F("    addCell(`<span class='label ${btn.color}'>${btn.color}</span>`);\n");
+  newJsContent += F("    const labelClass = btn.color.replace('btn-', 'label-');\n");
+  newJsContent += F("    addCell(`<span class='label ${labelClass}'>${btn.color}</span>`);\n");
   newJsContent += F("    if (btn.macro) {\n");
   newJsContent += F("        addCell('<code>-</code>');\n");
   newJsContent += F("        let snippet = btn.macroJson || '';\n");
