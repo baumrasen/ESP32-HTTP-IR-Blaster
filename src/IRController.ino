@@ -2793,7 +2793,7 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   server->on("/deletebackup", HTTP_GET, handleDeleteNamedBackup);
 
   // --- BUTTON HANDLER ---
-  server->on("/buttons", HTTP_GET, handleButtonConfigPage);      // Zeigt die Übersicht
+  // server->on("/buttons", HTTP_GET, handleButtonConfigPage);      // Zeigt die Übersicht (Redundant, sendButtonConfigPage wird oben verwendet)
   server->on("/addbutton", HTTP_GET, handleAddButtonPage);       // Zeigt leeres Formular
   server->on("/editbutton", HTTP_GET, handleEditButtonPage);     // Zeigt befülltes Formular
   server->on("/deletebutton", HTTP_GET, handleDeleteButton);   // Löscht Button (GET für Einfachheit, POST wäre besser)
