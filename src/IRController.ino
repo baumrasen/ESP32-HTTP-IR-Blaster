@@ -34,12 +34,12 @@ const unsigned int captureBufSize = 1024;                      // Size of the IR
 
 const bool toggleRC = true;                                    // Toggle RC signals every other transmission
 
-const uint16_t  pinr1 = 15;                                          // Receiving pin
-const uint16_t  pins1 = 13;                                           // Transmitting preset 1
-const uint16_t  configpin = 10;                                      // Reset Pin
+const uint16_t  pinr1 = 22;                                          // Receiving pin
+const uint16_t  pins1 = 21;                                          // Transmitting preset 1
+const uint16_t  configpin = 0;                                       // Reset Pin (GPIO 10 is unsafe on ESP32, 0 is Boot button)
 const uint16_t  pins2 = 5;                                           // Transmitting preset 2
 const uint16_t  pins3 = 12;                                          // Transmitting preset 3
-const uint16_t  pins4 = 4;                                          // Transmitting preset 4
+const uint16_t  pins4 = 4;                                           // Transmitting preset 4
 
 //+=============================================================================
 // User settings are above here
@@ -574,6 +574,11 @@ void loadButtonConfig() {
           newButton.macroJson[sizeof(newButton.macroJson) - 1] = '\0';
           newButton.layoutRow = buttonJson["layoutRow"] | -1; // Default -1, falls nicht in JSON
           newButton.layoutCol = buttonJson["layoutCol"] | -1; // Default -1, falls nicht in JSON
+          
+          // --- Safety Clamping to prevent WDT crashes on huge grids ---
+          if (newButton.layoutRow > 50) newButton.layoutRow = 50; 
+          if (newButton.layoutCol > 10) newButton.layoutCol = 10;
+
           strncpy(newButton.colorClass, buttonJson["colorClass"] | "btn-primary", sizeof(newButton.colorClass) - 1); // Default "btn-primary"
           newButton.colorClass[sizeof(newButton.colorClass) - 1] = '\0'; // Null-terminieren
           
@@ -782,8 +787,8 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info){
   Serial.printf("[WiFi-event] event: %d\n", event);
 
   switch (event) {
-    case SYSTEM_EVENT_STA_DISCONNECTED: // Older Cores might use this enum name directly
-    // case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: // Newer Cores use this
+    // case SYSTEM_EVENT_STA_DISCONNECTED: // Older Cores might use this enum name directly
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: // Newer Cores use this
         Serial.println("Lost Wifi - WiFi station disconnected");
         Serial.printf("Reason: %d\n", info.wifi_sta_disconnected.reason);
         // reset and try again
@@ -895,10 +900,10 @@ bool setupWifi(bool resetConf) {
   // strncpy(host_name, custom_hostname.getValue(), 20);
   // strncpy(passcode, custom_passcode.getValue(), 20);
   // strncpy(port_str, custom_port.getValue(), 6);
-  strncpy(host_name, custom_hostname, 20);
-  strncpy(passcode, custom_passcode, 20);
-  strncpy(port_str, custom_port, 6);
-  port = atoi(port_str);
+  // strncpy(host_name, custom_hostname, 20);
+  // strncpy(passcode, custom_passcode, 20);
+  // strncpy(port_str, custom_port, 6);
+  // port = atoi(port_str);
 
   // --- PRÜFUNG ---
   port = atoi(port_str);
@@ -1209,6 +1214,300 @@ void generateAndWriteJavaScript() {
   newJsContent += F("    if (macroRadio.checked) { toggleButtonFields(true); }\n");
   newJsContent += F("    else { const singleRadio = document.querySelector('input[name=\"btn_isMacro\"][value=\"0\"]'); if (singleRadio && singleRadio.checked) { toggleButtonFields(false); } else { toggleButtonFields(false); } }\n");
   newJsContent += F("  }\n\n");
+
+  // --- NEU: Client-Side Button Rendering ---
+  newJsContent += F("/* --- Client-Side Button Rendering --- */\n");
+  newJsContent += F("function createButtonElement(btn) {\n");
+  newJsContent += F("  const b = document.createElement('button');\n");
+  newJsContent += F("  b.id = btn.id;\n");
+  newJsContent += F("  b.className = `btn ${btn.color} btn-lg remote-button`;\n");
+  newJsContent += F("  b.style.margin = '2px';\n");
+  newJsContent += F("  if(btn.row >= 0) b.style.width = '90%';\n");
+  newJsContent += F("  b.dataset.ismacro = btn.macro;\n");
+  newJsContent += F("  if (!btn.macro) {\n");
+  newJsContent += F("    b.dataset.type = btn.type; b.dataset.data = btn.data;\n");
+  newJsContent += F("    b.dataset.length = btn.len; b.dataset.address = btn.addr;\n");
+  newJsContent += F("    b.dataset.repeat = btn.rep; b.dataset.out = btn.out;\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("  b.textContent = btn.name;\n");
+  newJsContent += F("  return b;\n");
+  newJsContent += F("}\n\n");
+
+  newJsContent += F("function renderButtons() {\n");
+  newJsContent += F("  const container = document.getElementById('remote-buttons');\n");
+  newJsContent += F("  if (!container || typeof remoteButtons === 'undefined') return;\n");
+  newJsContent += F("  container.innerHTML = '<h3>Remote Buttons</h3>';\n");
+  newJsContent += F("  const withLayout = remoteButtons.filter(b => b.row >= 0 && b.col >= 0);\n");
+  newJsContent += F("  const noLayout = remoteButtons.filter(b => b.row < 0 || b.col < 0);\n");
+  newJsContent += F("  if (withLayout.length > 0) {\n");
+  newJsContent += F("      const maxRow = Math.max(...withLayout.map(b => b.row));\n");
+  newJsContent += F("      for (let r = 0; r <= maxRow; r++) {\n");
+  newJsContent += F("          const rowButtons = withLayout.filter(b => b.row === r);\n");
+  newJsContent += F("          if (rowButtons.length === 0) continue;\n");
+  newJsContent += F("          const rowDiv = document.createElement('div'); rowDiv.className = 'row'; rowDiv.style.marginBottom = '10px';\n");
+  newJsContent += F("          const maxCol = Math.max(...rowButtons.map(b => b.col));\n");
+  newJsContent += F("          const colsPerBtn = Math.max(1, Math.floor(12 / (maxCol + 1)));\n");
+  newJsContent += F("          for(let c=0; c<=maxCol; c++) {\n");
+  newJsContent += F("              const btnData = rowButtons.find(b => b.col === c);\n");
+  newJsContent += F("              const colDiv = document.createElement('div'); colDiv.className = `col-xs-${colsPerBtn} text-center`;\n");
+  newJsContent += F("              if (btnData) colDiv.appendChild(createButtonElement(btnData));\n");
+  newJsContent += F("              else colDiv.innerHTML = '&nbsp;';\n");
+  newJsContent += F("              rowDiv.appendChild(colDiv);\n");
+  newJsContent += F("          }\n");
+  newJsContent += F("          container.appendChild(rowDiv);\n");
+  newJsContent += F("      }\n");
+  newJsContent += F("      container.appendChild(document.createElement('hr'));\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("  if (noLayout.length > 0) {\n");
+  newJsContent += F("      const rowDiv = document.createElement('div'); rowDiv.className = 'row';\n");
+  newJsContent += F("      const colDiv = document.createElement('div'); colDiv.className = 'col-xs-12';\n");
+  newJsContent += F("      colDiv.innerHTML = '<h4>Other Buttons:</h4>';\n");
+  newJsContent += F("      noLayout.forEach(btn => { const el = createButtonElement(btn); el.style.margin = '5px'; colDiv.appendChild(el); });\n");
+  newJsContent += F("      rowDiv.appendChild(colDiv); container.appendChild(rowDiv); container.appendChild(document.createElement('hr'));\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("  container.insertAdjacentHTML('beforeend', `<h3>Configuration</h3><a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons / Send IR Code for testing</a><a href='/backup' class='btn btn-info' style='margin: 5px;'>Download Config</a><a href='/clearconfig' class='btn btn-danger' style='margin: 5px;' onclick='return confirm(\"Are you sure you want to delete ALL buttons? This cannot be undone.\");'>Clear Config</a>`);\n");
+  newJsContent += F("}\n");
+  newJsContent += F("document.addEventListener('DOMContentLoaded', renderButtons);\n");
+
+  newJsContent += F("/* --- Client-Side Config Table Rendering --- */\n");
+  newJsContent += F("function renderConfigTable() {\n");
+  newJsContent += F("  const tableBody = document.getElementById('config-buttons-table-body');\n");
+  newJsContent += F("  if (!tableBody || typeof configButtonsData === 'undefined') return;\n");
+  newJsContent += F("  tableBody.innerHTML = '';\n");
+  newJsContent += F("  if (configButtonsData.length === 0) {\n");
+  newJsContent += F("    tableBody.innerHTML = \"<tr><td colspan='9' class='text-center'><em>No buttons configured.</em></td></tr>\";\n");
+  newJsContent += F("    return;\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("  configButtonsData.forEach((btn, index) => {\n");
+  newJsContent += F("    const row = document.createElement('tr');\n");
+  newJsContent += F("    row.draggable = true;\n");
+  newJsContent += F("    row.addEventListener('dragstart', handleDragStart);\n");
+  newJsContent += F("    row.addEventListener('dragover', handleDragOver);\n");
+  newJsContent += F("    row.addEventListener('dragenter', handleDragEnter);\n");
+  newJsContent += F("    row.addEventListener('dragleave', handleDragLeave);\n");
+  newJsContent += F("    row.addEventListener('drop', handleDrop);\n");
+  newJsContent += F("    row.addEventListener('dragend', handleDragEnd);\n");
+
+  newJsContent += F("    const addCell = (html) => { const td = document.createElement('td'); td.innerHTML = html; row.appendChild(td); };\n");
+  newJsContent += F("    addCell(index);\n");
+  
+  newJsContent += F("    const nameTd = document.createElement('td'); nameTd.innerText = btn.name; makeEditable(nameTd, index, 'btn_name', 'text'); row.appendChild(nameTd);\n");
+  
+  newJsContent += F("    const rowTd = document.createElement('td'); rowTd.innerText = btn.row; makeEditable(rowTd, index, 'btn_layoutRow', 'number'); row.appendChild(rowTd);\n");
+  
+  newJsContent += F("    const colTd = document.createElement('td'); colTd.innerText = btn.col; makeEditable(colTd, index, 'btn_layoutCol', 'number'); row.appendChild(colTd);\n");
+
+  newJsContent += F("    const labelClass = btn.color.replace('btn-', 'label-');\n");
+  newJsContent += F("    addCell(`<span class='label ${labelClass}'>${btn.color}</span>`);\n");
+  newJsContent += F("    if (btn.macro) {\n");
+  newJsContent += F("        addCell('<code>-</code>');\n");
+  newJsContent += F("        let snippet = btn.macroJson || '';\n");
+  newJsContent += F("        if (snippet.length > 30) snippet = snippet.substring(0, 27) + '...';\n");
+  newJsContent += F("        addCell(`<code style='font-size: 0.8em;'>${snippet.replace(/</g, '&lt;')}</code>`);\n");
+  newJsContent += F("        addCell('Macro');\n");
+  newJsContent += F("    } else {\n");
+  newJsContent += F("        addCell(`<code>${btn.type}</code>`);\n");
+  newJsContent += F("        const addr = (btn.addr && btn.addr.length > 0) ? btn.addr : '-';\n");
+  newJsContent += F("        addCell(`D:<code>${btn.data}</code> L:${btn.len} A:<code>${addr}</code> R:${btn.rep} O:<code>${btn.outLabel}</code>`);\n");
+  newJsContent += F("        addCell('Single IR');\n");
+  newJsContent += F("    }\n");
+  newJsContent += F("    const actions = `\n");
+  newJsContent += F("      <a href='/editbutton?id=${index}' class='btn btn-xs btn-warning' style='margin-right: 3px;'>Edit</a>\n");
+  newJsContent += F("      <a href='/deletebutton?id=${index}' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure you want to delete button \\'${btn.name.replace(/'/g, \"\\\\'\").replace(/\"/g, '&quot;')}\\'?\");'>Delete</a>\n");
+  newJsContent += F("    `;\n");
+  newJsContent += F("    addCell(actions);\n");
+  newJsContent += F("    tableBody.appendChild(row);\n");
+  newJsContent += F("  });\n");
+  newJsContent += F("}\n");
+  newJsContent += F("document.addEventListener('DOMContentLoaded', renderConfigTable);\n");
+
+  newJsContent += F("/* --- Drag & Drop Reordering --- */\n");
+  newJsContent += F("/* CSS Injection */\n");
+  newJsContent += F("const style = document.createElement('style');\n");
+  newJsContent += F("style.innerHTML = `\n");
+  newJsContent += F("  .drag-source { opacity: 0.4; }\n");
+  newJsContent += F("  .drag-over { border-top: 2px solid #337ab7; }\n");
+  newJsContent += F("  tr[draggable=true] { cursor: move; }\n");
+  newJsContent += F("`;\n");
+  newJsContent += F("document.head.appendChild(style);\n\n");
+
+  newJsContent += F("let dragSrcEl = null;\n");
+  newJsContent += F("function handleDragStart(e) {\n");
+  newJsContent += F("  dragSrcEl = this;\n");
+  newJsContent += F("  e.dataTransfer.effectAllowed = 'move';\n");
+  newJsContent += F("  e.dataTransfer.setData('text/html', this.innerHTML);\n");
+  newJsContent += F("  this.classList.add('drag-source');\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDragOver(e) {\n");
+  newJsContent += F("  if (e.preventDefault) e.preventDefault();\n");
+  newJsContent += F("  e.dataTransfer.dropEffect = 'move';\n");
+  newJsContent += F("  return false;\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDragEnter(e) {\n");
+  newJsContent += F("  this.classList.add('drag-over');\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDragLeave(e) {\n");
+  newJsContent += F("  this.classList.remove('drag-over');\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDrop(e) {\n");
+  newJsContent += F("  if (e.stopPropagation) e.stopPropagation();\n");
+  newJsContent += F("  if (dragSrcEl !== this) {\n");
+  newJsContent += F("    const srcIdx = parseInt(dragSrcEl.cells[0].innerText);\n");
+  newJsContent += F("    const dstIdx = parseInt(this.cells[0].innerText);\n");
+  newJsContent += F("    const formData = new URLSearchParams();\n");
+  newJsContent += F("    formData.append('src', srcIdx);\n");
+  newJsContent += F("    formData.append('dst', dstIdx);\n");
+  newJsContent += F("    fetch('/reorderbuttons', { method: 'POST', body: formData })\n");
+  newJsContent += F("    .then(res => {\n");
+  newJsContent += F("      if(res.ok) location.reload();\n");
+  newJsContent += F("      else alert('Reorder failed');\n");
+  newJsContent += F("    });\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("  return false;\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function handleDragEnd(e) {\n");
+  newJsContent += F("  this.classList.remove('drag-source');\n");
+  newJsContent += F("  document.querySelectorAll('#config-buttons-table-body tr').forEach(row => row.classList.remove('drag-over'));\n");
+  newJsContent += F("}\n");
+
+  newJsContent += F("/* --- Inline Editing --- */\n");
+  newJsContent += F("function makeEditable(cell, id, field, type) {\n");
+  newJsContent += F("  cell.style.cursor = 'pointer';\n");
+  newJsContent += F("  cell.title = 'Click to edit';\n");
+  newJsContent += F("  cell.onclick = function(e) {\n");
+  newJsContent += F("    if (this.hasAttribute('data-editing')) return;\n");
+  newJsContent += F("    e.stopPropagation();\n");
+  newJsContent += F("    this.setAttribute('data-editing', 'true');\n");
+  newJsContent += F("    const oldVal = this.innerText;\n");
+  newJsContent += F("    const input = document.createElement('input');\n");
+  newJsContent += F("    input.type = type;\n");
+  newJsContent += F("    input.value = oldVal;\n");
+  newJsContent += F("    input.style.width = '100%';\n");
+  newJsContent += F("    input.className = 'form-control input-sm';\n");
+  newJsContent += F("    input.onblur = function() { saveCellEdit(cell, id, field, this.value, oldVal); };\n");
+  newJsContent += F("    input.onkeydown = function(e) { if(e.key === 'Enter') this.blur(); if(e.key === 'Escape') { cell.innerText = oldVal; cell.removeAttribute('data-editing'); } };\n");
+  newJsContent += F("    this.innerHTML = '';\n");
+  newJsContent += F("    this.appendChild(input);\n");
+  newJsContent += F("    input.focus();\n");
+  newJsContent += F("  };\n");
+  newJsContent += F("}\n");
+  newJsContent += F("function saveCellEdit(cell, id, field, newVal, oldVal) {\n");
+  newJsContent += F("  if (newVal === oldVal) { cell.innerText = oldVal; cell.removeAttribute('data-editing'); return; }\n");
+  newJsContent += F("  const formData = new URLSearchParams();\n");
+  newJsContent += F("  formData.append('button_id', id);\n");
+  newJsContent += F("  formData.append(field, newVal);\n");
+  newJsContent += F("  fetch('/savebutton', { method: 'POST', body: formData })\n");
+  newJsContent += F("  .then(res => {\n");
+  newJsContent += F("    if (res.ok) {\n");
+  newJsContent += F("      cell.innerText = newVal;\n");
+  newJsContent += F("      if (field.includes('layout')) location.reload();\n"); // Reload bei Layout-Änderung für Grid-Update
+  newJsContent += F("    } else {\n");
+  newJsContent += F("      cell.innerText = oldVal;\n");
+  newJsContent += F("      alert('Error saving value');\n");
+  newJsContent += F("    }\n");
+  newJsContent += F("    cell.removeAttribute('data-editing');\n");
+  newJsContent += F("  })\n");
+  newJsContent += F("  .catch(e => { cell.innerText = oldVal; cell.removeAttribute('data-editing'); alert('Network error'); });\n");
+  newJsContent += F("}\n");
+
+  newJsContent += F("/* --- Dropdown Population (Type & Out) --- */\n");
+  newJsContent += F("function populateDropdowns() {\n");
+  newJsContent += F("  const irTypes = ['nec', 'sony', 'rc5', 'rc6', 'panasonic', 'lg', 'jvc', 'samsung', 'whynter', 'coolix', 'denon', 'sharp', 'sharpraw', 'dish', 'gree', 'lutron', 'roomba', 'ecoclim'];\n");
+  newJsContent += F("  document.querySelectorAll('select[data-type=\"ir-type\"]').forEach(sel => {\n");
+  newJsContent += F("     const currentVal = sel.dataset.selected || 'nec';\n");
+  newJsContent += F("     let html = '';\n");
+  newJsContent += F("     irTypes.forEach(t => {\n");
+  newJsContent += F("        const isSel = (t.toLowerCase() === currentVal.toLowerCase()) ? ' selected' : '';\n");
+  newJsContent += F("        html += `<option value='${t}'${isSel}>${t.toUpperCase()}</option>`;\n");
+  newJsContent += F("     });\n");
+  newJsContent += F("     sel.innerHTML = html;\n");
+  newJsContent += F("  });\n");
+  newJsContent += F("  document.querySelectorAll('select[data-type=\"out-pin\"]').forEach(sel => {\n");
+  newJsContent += F("     const currentVal = sel.dataset.selected || '1';\n");
+  newJsContent += F("     const pins = JSON.parse(sel.dataset.pins || '[0,0,0,0]');\n");
+  newJsContent += F("     let html = '';\n");
+  newJsContent += F("     for(let i=1; i<=4; i++) {\n");
+  newJsContent += F("        const isSel = (i == currentVal) ? ' selected' : '';\n");
+  newJsContent += F("        html += `<option value='${i}'${isSel}>${i} (GPIO ${pins[i-1]})</option>`;\n");
+  newJsContent += F("     }\n");
+  newJsContent += F("     sel.innerHTML = html;\n");
+  newJsContent += F("  });\n");
+  newJsContent += F("}\n");
+  newJsContent += F("document.addEventListener('DOMContentLoaded', populateDropdowns);\n");
+
+  // --- NEU: Initial Log Table Population & Footer Rendering ---
+  newJsContent += F("\n/* --- Initial Log Table Population --- */\n");
+  newJsContent += F("function populateInitialTables() {\n");
+  newJsContent += F("  if (typeof initialSentCodes !== 'undefined' && initialSentCodes.length > 0) {\n");
+  newJsContent += F("    const sentBody = document.getElementById('sent-codes-body');\n");
+  newJsContent += F("    if(sentBody) sentBody.innerHTML = '';\n");
+  newJsContent += F("    initialSentCodes.forEach(code => addTableRow('sent-codes-body', code, true));\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("  if (typeof initialReceivedCodes !== 'undefined' && initialReceivedCodes.length > 0) {\n");
+  newJsContent += F("    const recvBody = document.getElementById('received-codes-body');\n");
+  newJsContent += F("    if(recvBody) recvBody.innerHTML = '';\n");
+  newJsContent += F("    initialReceivedCodes.forEach(code => addTableRow('received-codes-body', code, false));\n");
+  newJsContent += F("  }\n");
+  newJsContent += F("}\n");
+  newJsContent += F("document.addEventListener('DOMContentLoaded', populateInitialTables);\n\n");
+
+  newJsContent += F("/* --- Footer Rendering --- */\n");
+  newJsContent += F("function renderFooter() {\n");
+  newJsContent += F("    const container = document.getElementById('footer-container');\n");
+  newJsContent += F("    if (!container || typeof footerData === 'undefined') return;\n");
+  newJsContent += F("    const row = document.createElement('div');\n");
+  newJsContent += F("    row.className = 'row';\n");
+  newJsContent += F("\n");
+  newJsContent += F("    const devCol = document.createElement('div');\n");
+  newJsContent += F("    devCol.className = 'col-md-4';\n");
+  newJsContent += F("    devCol.innerHTML = `\n");
+  newJsContent += F("        <h4>Device Information</h4>\n");
+  newJsContent += F("        <ul class='list-unstyled' style='font-size: 0.9em;'>\n");
+  newJsContent += F("            <li><strong>Hostname:</strong> <a href='http://${footerData.hostname}.local:${footerData.port}'>${footerData.hostname}.local:${footerData.port}</a></li>\n");
+  newJsContent += F("            <li><strong>Local IP:</strong> <a href='http://${footerData.local_ip}:${footerData.port}'>${footerData.local_ip}:${footerData.port}</a></li>\n");
+  newJsContent += F("            <li><strong>DNS IP:</strong> <a href='http://${footerData.dns_ip}'>${footerData.dns_ip}</a></li>\n");
+  newJsContent += F("            <li><strong>MAC Address:</strong> <code>${footerData.mac}</code></li>\n");
+  newJsContent += F("        </ul>`;\n");
+  newJsContent += F("    row.appendChild(devCol);\n");
+  newJsContent += F("\n");
+  newJsContent += F("    const pinCol = document.createElement('div');\n");
+  newJsContent += F("    pinCol.className = 'col-md-4';\n");
+  newJsContent += F("    pinCol.innerHTML = `\n");
+  newJsContent += F("        <h4>Pin Configuration</h4>\n");
+  newJsContent += F("        <ul class='list-unstyled' style='font-size: 0.9em;'>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.recv}</span> Receiving </li>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.send1}</span> Transmitter 1 </li>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.send2}</span> Transmitter 2 </li>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.send3}</span> Transmitter 3 </li>\n");
+  newJsContent += F("            <li><span class='badge'>GPIO ${footerData.pins.send4}</span> Transmitter 4 </li>\n");
+  newJsContent += F("        </ul>`;\n");
+  newJsContent += F("    row.appendChild(pinCol);\n");
+  newJsContent += F("\n");
+  newJsContent += F("    const memCol = document.createElement('div');\n");
+  newJsContent += F("    memCol.className = 'col-md-4';\n");
+  newJsContent += F("    let memHtml = '<h4>Memory Usage</h4>';\n");
+  newJsContent += F("    memHtml += `<table class='table table-condensed table-bordered' style='font-size: 0.8em;'>\n");
+  newJsContent += F("        <thead><tr><th>T</th><th>Used</th><th>Total</th><th>%</th><th>Graph</th></tr></thead>\n");
+  newJsContent += F("        <tbody>`;\n");
+  newJsContent += F("    const createBar = (pct) => {\n");
+  newJsContent += F("        let bar = ''; const filled = Math.round(pct / 100.0 * 10);\n");
+  newJsContent += F("        for (let i = 0; i < 10; i++) { bar += (i < filled) ? '=' : '-'; }\n");
+  newJsContent += F("        return bar;\n");
+  newJsContent += F("    };\n");
+  newJsContent += F("    const fs = footerData.memory.fs;\n");
+  newJsContent += F("    memHtml += `<tr><td>FS</td><td>${fs.used}K</td><td>${fs.total}K</td><td>${fs.pct}</td><td><samp>${createBar(fs.pct)}</samp></td></tr>`;\n");
+  newJsContent += F("    const app = footerData.memory.app;\n");
+  newJsContent += F("    memHtml += `<tr><td>App</td><td>${app.used}K</td><td>${app.total}K</td><td>${app.pct}</td><td><samp>${createBar(app.pct)}</samp></td></tr>`;\n");
+  newJsContent += F("    const ram = footerData.memory.ram;\n");
+  newJsContent += F("    memHtml += `<tr><td>RAM</td><td>${ram.used}K</td><td>${ram.total}K</td><td>${ram.pct}</td><td><samp>${createBar(ram.pct)}</samp></td></tr>`;\n");
+  newJsContent += F("    memHtml += '</tbody></table>';\n");
+  newJsContent += F("    memCol.innerHTML = memHtml;\n");
+  newJsContent += F("    row.appendChild(memCol);\n");
+  newJsContent += F("    container.innerHTML = '';\n");
+  newJsContent += F("    container.appendChild(row);\n");
+  newJsContent += F("}\n");
+  newJsContent += F("document.addEventListener('DOMContentLoaded', renderFooter);\n");
+
   // --- Ende Aufbau newJsContent ---
 
   // 2. Lese den VORHANDENEN Inhalt (falls Datei existiert)
@@ -1333,50 +1632,6 @@ String generateColorDropdownHtml(const String& selectName, const String& selecte
 }
 
 
-//+=============================================================================
-// Hilfsfunktion zum Generieren des Type-Dropdowns
-//+=============================================================================
-String generateTypeDropdownHtml(const String& selectName, const String& selectedValue) {
-  String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
-  // Helper innerhalb der Funktion
-  auto addSelected = [&](const String& val) { return val.equalsIgnoreCase(selectedValue) ? " selected" : ""; };
-
-  html += String("  <option value='nec'") + addSelected("nec") + ">NEC</option>\n";
-  html += String("  <option value='sony'") + addSelected("sony") + ">SONY</option>\n";
-  html += String("  <option value='rc5'") + addSelected("rc5") + ">RC5</option>\n";
-  html += String("  <option value='rc6'") + addSelected("rc6") + ">RC6</option>\n";
-  html += String("  <option value='panasonic'") + addSelected("panasonic") + ">PANASONIC</option>\n";
-  html += String("  <option value='lg'") + addSelected("lg") + ">LG</option>\n";
-  html += String("  <option value='jvc'") + addSelected("jvc") + ">JVC</option>\n";
-  html += String("  <option value='samsung'") + addSelected("samsung") + ">SAMSUNG</option>\n";
-  html += String("  <option value='whynter'") + addSelected("whynter") + ">WHYNTER</option>\n";
-  html += String("  <option value='coolix'") + addSelected("coolix") + ">COOLIX</option>\n";
-  html += String("  <option value='denon'") + addSelected("denon") + ">DENON</option>\n";
-  html += String("  <option value='sharp'") + addSelected("sharp") + ">SHARP</option>\n";
-  html += String("  <option value='sharpraw'") + addSelected("sharpraw") + ">SHARPRAW</option>\n";
-  html += String("  <option value='dish'") + addSelected("dish") + ">DISH</option>\n";
-  html += String("  <option value='gree'") + addSelected("gree") + ">GREE</option>\n";
-  html += String("  <option value='lutron'") + addSelected("lutron") + ">LUTRON</option>\n";
-  html += String("  <option value='roomba'") + addSelected("roomba") + ">ROOMBA</option>\n";
-  html += String("  <option value='ecoclim'") + addSelected("ecoclim") + ">ECOCLIM</option>\n";
-  // Füge hier weitere Typen hinzu, falls nötig. Sie gelten dann für beide Formulare.
-  html += "</select>\n";
-  return html;
-}
-
-// Optional: Globale Hilfsfunktion für Output-Dropdown (falls noch nicht geschehen)
-String generateOutDropdownHtml(const String& selectName, int selectedValue) {
-  String html = "<select class='form-control' id='" + selectName + "' name='" + selectName + "'>\n";
-  auto addOutSelected = [&](int val) { return (val == selectedValue) ? " selected" : ""; };
-  html += String("  <option value='1'") + addOutSelected(1) + ">1 (GPIO " + String(pins1) + ")</option>\n";
-  html += String("  <option value='2'") + addOutSelected(2) + ">2 (GPIO " + String(pins2) + ")</option>\n";
-  html += String("  <option value='3'") + addOutSelected(3) + ">3 (GPIO " + String(pins3) + ")</option>\n";
-  html += String("  <option value='4'") + addOutSelected(4) + ">4 (GPIO " + String(pins4) + ")</option>\n";
-  html += "</select>\n";
-  return html;
-}
-
-
 // Hilfsfunktion zum Generieren des Formulars für einen Button
 void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& buttonData, int buttonId) {
   String prefix = "btn_"; // Einheitlicher Prefix
@@ -1430,7 +1685,7 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   // Type Dropdown
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='" + prefix + "type' class='col-sm-2 control-label'>Type</label>\n");
-  response->print("              <div class='col-sm-10'>" + generateTypeDropdownHtml(prefix + "type", String(buttonData.type)) + "</div>\n");
+  response->print("              <div class='col-sm-10'><select class='form-control' id='" + prefix + "type' name='" + prefix + "type' data-type='ir-type' data-selected='" + String(buttonData.type) + "'></select></div>\n");
   response->print("            </div>\n");
 
   // Data
@@ -1460,7 +1715,8 @@ void generateButtonForm(AsyncResponseStream *response, const ButtonConfig& butto
   // Output Pin
   response->print("            <div class='form-group'>\n");
   response->print("              <label for='" + prefix + "out' class='col-sm-2 control-label'>Output Pin</label>\n");
-  response->print("              <div class='col-sm-10'>" + generateOutDropdownHtml(prefix + "out", buttonData.out) + "</div>\n");
+  String pinJson = "[" + String(pins1) + "," + String(pins2) + "," + String(pins3) + "," + String(pins4) + "]";
+  response->print("              <div class='col-sm-10'><select class='form-control' id='" + prefix + "out' name='" + prefix + "out' data-type='out-pin' data-selected='" + String(buttonData.out) + "' data-pins='" + pinJson + "'></select></div>\n");
   response->print("            </div>\n");
 
   response->print("            </div>\n"); // <-- KORREKTES ENDE von 'single-ir-fields'
@@ -1673,132 +1929,120 @@ if (buttonId >= 0 && buttonId < buttonConfigs.size()) {
 }
 }
 
+// Handler zum Löschen der gesamten Konfiguration
+void handleClearConfig(AsyncWebServerRequest *request) {
+  Serial.println("Connection received endpoint '/clearconfig' (GET)");
+  buttonConfigs.clear();
+  saveButtonConfig(); // Speichert leere Liste und aktualisiert JS
+  request->redirect("/?status=config_cleared");
+}
+
+// Handler zum Ändern der Reihenfolge (Drag & Drop)
+void handleReorderButtons(AsyncWebServerRequest *request) {
+  Serial.println("Connection received endpoint '/reorderbuttons' (POST)");
+  if (request->hasParam("src", true) && request->hasParam("dst", true)) {
+      int srcIdx = request->getParam("src", true)->value().toInt();
+      int dstIdx = request->getParam("dst", true)->value().toInt();
+      
+      if (srcIdx >= 0 && srcIdx < buttonConfigs.size() && dstIdx >= 0 && dstIdx < buttonConfigs.size()) {
+          Serial.printf("  Moving button from %d to %d\n", srcIdx, dstIdx);
+          ButtonConfig temp = buttonConfigs[srcIdx];
+          buttonConfigs.erase(buttonConfigs.begin() + srcIdx);
+          buttonConfigs.insert(buttonConfigs.begin() + dstIdx, temp);
+          saveButtonConfig();
+          request->send(200, "text/plain", "OK");
+      } else {
+          request->send(400, "text/plain", "Invalid indices");
+      }
+  } else {
+      request->send(400, "text/plain", "Missing parameters");
+  }
+}
+
 void handleSaveButton(AsyncWebServerRequest *request) {
   Serial.println("==> handleSaveButton: Entered function.");
 
-  // -- manuell per Index suchen ---
-  int params = request->params();
-  Serial.printf("    Scanning %d parameters...\n", params);
-
-  // Lokale Variablen für die gelesenen Werte initialisieren
-  String buttonIdStr = ""; // ID als String lesen
-  String name = "";
-  String type = "";
-  String data = "";
-  String lengthStr = ""; // Länge als String lesen
-  String address = "";
-  String repeatStr = ""; // Repeat als String lesen
-  String outStr = "";    // Out als String lesen
-  String isMacroStr = "";
-  String macroJson = "";
-  String layoutRowStr = "";
-  String layoutColStr = "";
-  String colorClassStr = ""; // Für die Farbklasse
-  bool buttonIdFound = false;
-
-  for(int i=0; i<params; i++){
-    const AsyncWebParameter* p = request->getParam(i);
-    // Nur POST-Parameter berücksichtigen
-    if(p->isPost()){
-      String paramName = p->name(); // Namen holen
-      String paramValue = p->value(); // Wert holen
-      Serial.printf("      POST[%s]: %s\n", paramName.c_str(), paramValue.c_str()); // Debug
-
-      // Werte basierend auf dem Namen zuweisen
-      if (paramName.equals("button_id")) {
-        buttonIdStr = paramValue;
-        buttonIdFound = true;
-      } else if (paramName.equals("btn_name")) {
-        name = paramValue;
-      } 
-      // --- Makro-Felder lesen ---
-      else if (paramName.equals("btn_isMacro")) { isMacroStr = paramValue; }
-      else if (paramName.equals("btn_macroJson")) { macroJson = paramValue; }
-      
-      else if (paramName.equals("btn_type")) {
-        type = paramValue;
-      } else if (paramName.equals("btn_data")) {
-        data = paramValue;
-      } else if (paramName.equals("btn_length")) {
-        lengthStr = paramValue;
-      } else if (paramName.equals("btn_address")) {
-        address = paramValue;
-      } else if (paramName.equals("btn_repeat")) {
-        repeatStr = paramValue;
-      } else if (paramName.equals("btn_out")) {
-        outStr = paramValue;
-      } else if (paramName.equals("btn_layoutRow")) {
-        layoutRowStr = paramValue;
-      } else if (paramName.equals("btn_layoutCol")) {
-        layoutColStr = paramValue;
-      } else if (paramName.equals("btn_colorClass")) {
-        colorClassStr = paramValue;
-      }
-    } else {
-       Serial.printf("      Ignoring non-POST param[%s]: %s\n", p->name().c_str(), p->value().c_str());
-    }
-  }
-  Serial.println("    Parameter scan complete.");
-
-  // --- Prüfung, ob button_id gefunden wurde ---
-  if (!buttonIdFound) {
-      Serial.println("    ERROR: Parameter 'button_id' not found during manual scan!");
+  // 1. ID suchen
+  int buttonId = -1;
+  if (request->hasParam("button_id", true)) {
+      buttonId = request->getParam("button_id", true)->value().toInt();
+  } else {
+      Serial.println("    ERROR: Parameter 'button_id' not found!");
       request->redirect("/buttons?status=error_save");
       return;
   }
 
-  // --- Werte konvertieren ---
-  int buttonId = buttonIdStr.toInt();
-  bool isMacro = (isMacroStr == "1"); // Prüfe, ob der Wert "1" ist
-  int length = lengthStr.toInt();
-  int repeat = repeatStr.toInt();
-  int out = outStr.toInt();
-  // ... (andere Konvertierungen) ...
-  int layoutRow = layoutRowStr.toInt();
-  int layoutCol = layoutColStr.toInt();
-  // Konvertiere leere Eingaben oder 0 zu -1 für "nicht gesetzt"
-  if (layoutRowStr.length() == 0 || layoutRow < 0) layoutRow = -1;
-  if (layoutColStr.length() == 0 || layoutCol < 0) layoutCol = -1;
-  
-  name.trim();  // Trimme den Namen
+  // 2. Basis-Konfiguration laden (Existierend oder Default)
+  ButtonConfig tempButton;
+  if (buttonId >= 0 && buttonId < buttonConfigs.size()) {
+      tempButton = buttonConfigs[buttonId]; // Kopiere existierende Daten (für partielle Updates)
+      Serial.printf("    Loaded existing config for ID %d.\n", buttonId);
+  } else {
+      // Defaults für neuen Button
+      tempButton.repeat = 1;
+      tempButton.out = 1;
+      strncpy(tempButton.colorClass, "btn-primary", sizeof(tempButton.colorClass)-1);
+      tempButton.layoutRow = -1;
+      tempButton.layoutCol = -1;
+      Serial.println("    Initialized default config for new button.");
+  }
 
-  Serial.println("--- Parameter Values ---");
-  Serial.println("buttonIdStr: " + buttonIdStr);
-  Serial.println("name: " + name);
-  Serial.println("isMacroStr: " + isMacroStr);
-  Serial.println("macroJson (String): " + macroJson); // <-- WICHTIG: Inhalt der String-Variable
-  Serial.println("type (String): " + type);
-  Serial.println("data (String): " + data);
-  Serial.println("lengthStr: " + lengthStr);
-  Serial.println("address (String): " + address);
-  Serial.println("repeatStr: " + repeatStr);
-  Serial.println("outStr: " + outStr);
-  Serial.println("layoutRowStr: " + layoutRowStr + " -> " + String(layoutRow));
-  Serial.println("layoutColStr: " + layoutColStr + " -> " + String(layoutCol));
-  Serial.println("colorClassStr: " + colorClassStr);
-  Serial.println("------------------------");
+  // 3. Parameter iterieren und tempButton aktualisieren (Partielles Update)
+  int params = request->params();
+  for(int i=0; i<params; i++){
+    const AsyncWebParameter* p = request->getParam(i);
+    if(p->isPost()){
+      String name = p->name();
+      String val = p->value();
+      
+      if (name == "btn_name") { strncpy(tempButton.name, val.c_str(), sizeof(tempButton.name)-1); tempButton.name[sizeof(tempButton.name)-1]=0; }
+      else if (name == "btn_layoutRow") { 
+          if (val.length() == 0) tempButton.layoutRow = -1; 
+          else tempButton.layoutRow = val.toInt(); 
+          if (tempButton.layoutRow < 0) tempButton.layoutRow = -1;
+          if (tempButton.layoutRow > 50) tempButton.layoutRow = 50; // Clamp
+      }
+      else if (name == "btn_layoutCol") { 
+          if (val.length() == 0) tempButton.layoutCol = -1; 
+          else tempButton.layoutCol = val.toInt();
+          if (tempButton.layoutCol < 0) tempButton.layoutCol = -1;
+          if (tempButton.layoutCol > 10) tempButton.layoutCol = 10; // Clamp
+      }
+      else if (name == "btn_colorClass") { strncpy(tempButton.colorClass, val.c_str(), sizeof(tempButton.colorClass)-1); tempButton.colorClass[sizeof(tempButton.colorClass)-1]=0; }
+      else if (name == "btn_isMacro") { tempButton.isMacro = (val == "1"); }
+      else if (name == "btn_macroJson") { strncpy(tempButton.macroJson, val.c_str(), sizeof(tempButton.macroJson)-1); tempButton.macroJson[sizeof(tempButton.macroJson)-1]=0; }
+      else if (name == "btn_type") { strncpy(tempButton.type, val.c_str(), sizeof(tempButton.type)-1); tempButton.type[sizeof(tempButton.type)-1]=0; }
+      else if (name == "btn_data") { strncpy(tempButton.data, val.c_str(), sizeof(tempButton.data)-1); tempButton.data[sizeof(tempButton.data)-1]=0; }
+      else if (name == "btn_length") { tempButton.length = val.toInt(); }
+      else if (name == "btn_address") { strncpy(tempButton.address, val.c_str(), sizeof(tempButton.address)-1); tempButton.address[sizeof(tempButton.address)-1]=0; }
+      else if (name == "btn_repeat") { tempButton.repeat = val.toInt(); if(tempButton.repeat <= 0) tempButton.repeat = 1; }
+      else if (name == "btn_out") { tempButton.out = val.toInt(); if(tempButton.out < 1 || tempButton.out > 4) tempButton.out = 1; }
+    }
+  }
 
-  // --- Validierung ---
+  // 4. Validierung
+  String nameStr = String(tempButton.name);
+  nameStr.trim();
+  strncpy(tempButton.name, nameStr.c_str(), sizeof(tempButton.name)-1);
+
   // 1. Name ist immer erforderlich
-  if (name.length() == 0) {
+  if (strlen(tempButton.name) == 0) {
     Serial.println("    ERROR: Validation failed! (Name is missing). Redirecting.");
     request->redirect("/buttons?status=error_invalid_data"); // Oder spezifischerer Status?
     return;
 }
 
 // 2. Spezifische Validierung basierend auf isMacro
-if (isMacro) {
-  Serial.println("    DEBUG: Vor strncpy für macroJson. Lokaler Wert:"); // NEU
-  Serial.println("    >>>> " + macroJson + " <<<<"); // NEU
+if (tempButton.isMacro) {
   // Validierung für Makro
-  if (macroJson.length() == 0) {
+  if (strlen(tempButton.macroJson) == 0) {
       Serial.println("    ERROR: Validation failed! (Macro JSON missing). Redirecting.");
       request->redirect("/buttons?status=error_invalid_macro_data"); // Status für Makro-Fehler
       return;
   }
   // JSON Validierung (wie gehabt)
   DynamicJsonDocument tempDoc(1024);
-  DeserializationError error = deserializeJson(tempDoc, macroJson);
+  DeserializationError error = deserializeJson(tempDoc, tempButton.macroJson);
   if (error) {
       Serial.print("    ERROR: Macro JSON validation failed: ");
       Serial.println(error.c_str());
@@ -1812,88 +2056,39 @@ if (isMacro) {
   }
   Serial.println("    Macro JSON validation passed.");
   // Single-IR Felder werden später ignoriert/geleert
-  type = ""; data = ""; length = 0; address = ""; repeat = 1; out = 1; // Setze hier schon Defaults/Leerwerte
+  tempButton.type[0] = 0; tempButton.data[0] = 0; tempButton.length = 0; 
+  tempButton.address[0] = 0; tempButton.repeat = 1; tempButton.out = 1;
 
   } else {
       // Validierung für Single IR (jetzt hier)
-      if (data.length() == 0 || length <= 0) {
+      if (strlen(tempButton.data) == 0 || tempButton.length <= 0) {
           Serial.println("    ERROR: Validation failed! (data or length invalid for single IR). Redirecting.");
           request->redirect("/buttons?status=error_invalid_data"); // Status passt hier
           return;
       }
-      // Defaults für Single IR (wie gehabt)
-      if (repeat <= 0) repeat = 1;
-      if (out <= 0 || out > 4) out = 1;
       // Makro-Feld wird später ignoriert/geleert
-      macroJson = ""; // Setze hier schon Leerwert
+      tempButton.macroJson[0] = 0;
       Serial.println("    Single IR validation passed.");
   }
 
   // --- Farbklasse validieren ---
   const char* validColors[] = {"btn-primary", "btn-success", "btn-info", "btn-warning", "btn-danger", "btn-default"};
   bool colorIsValid = false;
+  String colorStr = String(tempButton.colorClass);
   for (const char* validColor : validColors) {
-      if (colorClassStr.equalsIgnoreCase(validColor)) {
-          colorClassStr = validColor; // Stelle korrekte Schreibweise sicher
+      if (colorStr.equalsIgnoreCase(validColor)) {
+          strncpy(tempButton.colorClass, validColor, sizeof(tempButton.colorClass)-1); // Stelle korrekte Schreibweise sicher
           colorIsValid = true;
           break;
       }
   }
   if (!colorIsValid) {
-      Serial.println("    Warning: Invalid color class received ('" + colorClassStr + "'). Defaulting to btn-primary.");
-      colorClassStr = "btn-primary"; // Fallback auf Default
+      Serial.println("    Warning: Invalid color class. Defaulting to btn-primary.");
+      strncpy(tempButton.colorClass, "btn-primary", sizeof(tempButton.colorClass)-1);
   }
-  // --- Ende Farbklasse validieren ---
 
-  
-  // --- ENDE VALIDIERUNG ---
-
-  // Defaults setzen (redundant, da oben schon erledigt, aber schadet nicht)
-  if (repeat <= 0) repeat = 1;
-  if (out <= 0 || out > 4) out = 1;
-
- // --- Button-Daten vorbereiten ---
- ButtonConfig tempButton; // Temporäres Struct zum Befüllen
-
- // Gemeinsame Felder
- tempButton.configured = true;
- strncpy(tempButton.name, name.c_str(), sizeof(tempButton.name) - 1);
- tempButton.name[sizeof(tempButton.name) - 1] = '\0';
- tempButton.isMacro = isMacro;
- tempButton.layoutRow = layoutRow;
- tempButton.layoutCol = layoutCol;
- strncpy(tempButton.colorClass, colorClassStr.c_str(), sizeof(tempButton.colorClass) - 1);
- tempButton.colorClass[sizeof(tempButton.colorClass) - 1] = '\0';
-
-
- // Modus-spezifische Felder
- if (isMacro) {
-     // Makro-Daten kopieren
-     strncpy(tempButton.macroJson, macroJson.c_str(), sizeof(tempButton.macroJson) - 1);
-     tempButton.macroJson[sizeof(tempButton.macroJson) - 1] = '\0';
-     // Single-IR Felder leeren
-     tempButton.type[0] = '\0';
-     tempButton.data[0] = '\0';
-     tempButton.length = 0;
-     tempButton.address[0] = '\0';
-     tempButton.repeat = 1; // Default
-     tempButton.out = 1;    // Default
-     Serial.println("    Prepared tempButton for MACRO."); // Debug
- } else {
-     // Single-IR Daten kopieren
-     strncpy(tempButton.type, type.c_str(), sizeof(tempButton.type) - 1);
-     tempButton.type[sizeof(tempButton.type) - 1] = '\0';
-     strncpy(tempButton.data, data.c_str(), sizeof(tempButton.data) - 1);
-     tempButton.data[sizeof(tempButton.data) - 1] = '\0';
-     tempButton.length = length;
-     strncpy(tempButton.address, address.c_str(), sizeof(tempButton.address) - 1);
-     tempButton.address[sizeof(tempButton.address) - 1] = '\0';
-     tempButton.repeat = repeat;
-     tempButton.out = out;
-     // Makro-Feld leeren
-     tempButton.macroJson[0] = '\0';
-     Serial.println("    Prepared tempButton for SINGLE IR."); // Debug
- }
+  // Button ist konfiguriert
+  tempButton.configured = true;
 
  // --- Entscheiden: Add oder Edit ---
  if (buttonId == -1) { // Neuer Button
@@ -1955,62 +2150,57 @@ void handleButtonConfigPage(AsyncWebServerRequest *request) {
       }
   }
 
+  // +++ NEU: JSON-Daten für Config-Tabelle streamen +++
+  response->print("<script>\nconst configButtonsData = [");
+  bool firstCBtn = true;
+  for (size_t i = 0; i < buttonConfigs.size(); ++i) {
+      const auto& btn = buttonConfigs[i];
+      // buttonConfigs enthält nur konfigurierte Buttons
+      
+      if (!firstCBtn) response->print(",");
+      firstCBtn = false;
+      
+      response->print("{");
+      response->print("name:\""); response->print(btn.name); response->print("\",");
+      response->print("row:"); response->print(btn.layoutRow); response->print(",");
+      response->print("col:"); response->print(btn.layoutCol); response->print(",");
+      response->print("color:\""); response->print(btn.colorClass); response->print("\",");
+      response->print("macro:"); response->print(btn.isMacro ? "true" : "false");
+      
+      if (btn.isMacro) {
+          String mJson = String(btn.macroJson);
+          mJson.replace("\"", "\\\""); // Escape quotes für JS String
+          mJson.replace("\n", " ");
+          mJson.replace("\r", "");
+          response->print(",macroJson:\""); response->print(mJson); response->print("\"");
+      } else {
+          response->print(",type:\""); response->print(btn.type); response->print("\",");
+          response->print("data:\""); response->print(btn.data); response->print("\",");
+          response->print("len:"); response->print(btn.length); response->print(",");
+          response->print("addr:\""); response->print(btn.address); response->print("\",");
+          response->print("rep:"); response->print(btn.repeat); response->print(",");
+          
+          response->print("outLabel:\""); 
+          response->print(btn.out); 
+          response->print(" (GPIO ");
+          switch(btn.out) {
+              case 1: response->print(pins1); break;
+              case 2: response->print(pins2); break;
+              case 3: response->print(pins3); break;
+              case 4: response->print(pins4); break;
+              default: response->print("?"); break;
+          }
+          response->print(")\"");
+      }
+      response->print("}");
+      yield(); // WDT füttern
+  }
+  response->print("];\n</script>\n");
+
   response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n");
   response->print("            <thead><tr><th>Name</th><th>Mode</th><th>Type</th><th>Data/Macro</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Actions</th></tr></thead>\n");
- response->print("            <tbody>\n");
-
- if (!buttonConfigs.empty()) {
-  for (size_t i = 0; i < buttonConfigs.size(); ++i) {
-    const auto& button = buttonConfigs[i];
-
-    response->print("              <tr>\n");
-    response->print("                <td>" + String(button.name) + "</td>\n"); // Name
-    response->print("                <td>" + String(button.isMacro ? "Macro" : "Single") + "</td>\n");
-
-
-    // Jetzt die restlichen Spalten basierend auf dem Modus
-    if (button.isMacro) {
-        response->print("                <td><code>-</code></td>\n"); // Type N/A
-        // Macro JSON anzeigen (gekürzt)
-        String macroSnippet = String(button.macroJson);
-        if (macroSnippet.length() > 30) {
-            macroSnippet = macroSnippet.substring(0, 27) + "...";
-        }
-        response->print("                <td><code style='font-size: 0.8em;'>" + macroSnippet + "</code></td>\n"); // Macro Snippet
-        response->print("                <td><code>-</code></td>\n"); // Length N/A
-        response->print("                <td><code>-</code></td>\n"); // Address N/A
-        response->print("                <td><code>-</code></td>\n"); // Repeat N/A
-        response->print("                <td><code>-</code></td>\n"); // Out N/A
-    } else {
-        response->print("                <td><code>" + String(button.type) + "</code></td>\n"); // Type
-        response->print("                <td><code>" + String(button.data) + "</code></td>\n"); // Data
-        response->print("                <td><code>" + String(button.length) + "</code></td>\n"); // Length
-        response->print("                <td><code>" + (String(button.address).length() > 0 ? String(button.address) : "-") + "</code></td>\n"); // Address
-        response->print("                <td><code>" + String(button.repeat) + "</code></td>\n"); // Repeat
-        // Output Pin mit GPIO Info
-        String outText = String(button.out) + " (GPIO "; // Start building the string
-        switch(button.out) {
-            case 1: outText += String(pins1); break;
-            case 2: outText += String(pins2); break;
-            case 3: outText += String(pins3); break;
-            case 4: outText += String(pins4); break;
-            default: outText += "?"; break; // Fallback
-        }
-        outText += ")"; // Close parenthesis
-        response->print("                <td><code>" + outText + "</code></td>\n"); // Out
-    }
-
-    // Actions Spalte
-    response->print("                <td>\n");
-    response->print("                  <a href='/editbutton?id=" + String(i) + "' class='btn btn-xs btn-warning' style='margin-right: 3px;'>Edit</a>\n");
-    response->print("                  <a href='/deletebutton?id=" + String(i) + "' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure you want to delete button \\'" + String(button.name) + "\\'?\");'>Delete</a>\n");
-    response->print("                </td>\n");
-    response->print("              </tr>\n");
-  }
-} else {
-  response->print("              <tr><td colspan='9' class='text-center'><em>No buttons configured.</em></td></tr>\n");
-}
-
+  response->print("            <tbody id='config-buttons-table-body'>\n");
+  response->print("              <tr><td colspan='9' class='text-center'><em>Loading configuration...</em></td></tr>\n");
   response->print("            </tbody>\n");
   response->print("          </table>\n");
   // Button zum Hinzufügen eines neuen Buttons
@@ -2785,11 +2975,13 @@ server->on("/js/scripts.js", HTTP_GET, [](AsyncWebServerRequest *request){
   server->on("/deletebackup", HTTP_GET, handleDeleteNamedBackup);
 
   // --- BUTTON HANDLER ---
-  server->on("/buttons", HTTP_GET, handleButtonConfigPage);      // Zeigt die Übersicht
+  // server->on("/buttons", HTTP_GET, handleButtonConfigPage);      // Zeigt die Übersicht (Redundant, sendButtonConfigPage wird oben verwendet)
   server->on("/addbutton", HTTP_GET, handleAddButtonPage);       // Zeigt leeres Formular
   server->on("/editbutton", HTTP_GET, handleEditButtonPage);     // Zeigt befülltes Formular
   server->on("/deletebutton", HTTP_GET, handleDeleteButton);   // Löscht Button (GET für Einfachheit, POST wäre besser)
+  server->on("/clearconfig", HTTP_GET, handleClearConfig);     // Löscht alle Buttons
   server->on("/savebutton", HTTP_POST, handleSaveButton);
+  server->on("/reorderbuttons", HTTP_POST, handleReorderButtons); // Neuer Handler für Drag & Drop
   server->on("/sendbutton", HTTP_GET, handleSendButton);
   server->on("/sendir", HTTP_POST, handleSendIr);
 
@@ -2988,17 +3180,28 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
 
   // --- Backup/Restore Sektion ---
   response->print("          <hr><h2>Manage Configuration Backups</h2>");
-  response->print("          <div style='margin-bottom: 20px;'>");
-  response->print("            <h4>Save Current Configuration As:</h4>");
-  response->print("            <form method='POST' action='/savebackup' class='form-inline'>");
+  response->print("          <div class='well'>");
+  
+  // Save Backup Form
+  response->print("            <form method='POST' action='/savebackup' class='form-inline' style='display: inline-block; margin-right: 10px; margin-bottom: 5px;'>");
   response->print("              <div class='form-group'>");
-  response->print("                <label for='backup_name' class='sr-only'>Backup Name</label>");
-  response->print("                <input type='text' class='form-control' id='backup_name' name='backup_name' placeholder='e.g., living_room_setup' required>");
+  response->print("                <input type='text' class='form-control' name='backup_name' placeholder='Backup Name' required style='width: 150px;'>");
   response->print("                <button type='submit' class='btn btn-primary'>Save Backup</button>");
-  response->print("                <a href='/backup' class='btn btn-info'>Download Active Config (buttons.json)</a>");
+  response->print("              </div>");
+  response->print("            </form>");
+
+  // Download Link
+  response->print("            <a href='/backup' class='btn btn-info' style='margin-right: 10px; margin-bottom: 5px;'>Download Config</a>");
+
+  // Restore Form
+  response->print("            <form method='POST' action='/restore' enctype='multipart/form-data' class='form-inline' style='display: inline-block; margin-bottom: 5px;'>");
+  response->print("              <div class='form-group'>");
+  response->print("                <input type='file' class='form-control' name='data' accept='.json' required style='display: inline-block; width: auto;'>");
+  response->print("                <button type='submit' class='btn btn-warning' onclick='return confirm(\"Overwrite current configuration?\");'>Upload</button>");
   response->print("              </div>");
   response->print("            </form>");
   response->print("          </div>");
+
   response->print("          <h4>Available Backups:</h4>");
   response->print("          <ul class='list-group'>");
   File backupDir = LittleFS.open("/backups");
@@ -3036,61 +3239,60 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   response->print("          </ul><hr>");
   // --- ENDE Backup/Restore Sektion ---
 
+  // +++ NEU: JSON-Daten für Config-Tabelle streamen +++
+  response->print("<script>\nconst configButtonsData = [");
+  bool firstCBtn = true;
+  for (size_t i = 0; i < buttonConfigs.size(); ++i) {
+      const auto& btn = buttonConfigs[i];
+      
+      if (!firstCBtn) response->print(",");
+      firstCBtn = false;
+      
+      response->print("{");
+      String safeName = String(btn.name);
+      safeName.replace("\"", "\\\"");
+      response->print("name:\""); response->print(safeName); response->print("\",");
+      response->print("row:"); response->print(btn.layoutRow); response->print(",");
+      response->print("col:"); response->print(btn.layoutCol); response->print(",");
+      response->print("color:\""); response->print(btn.colorClass); response->print("\",");
+      response->print("macro:"); response->print(btn.isMacro ? "true" : "false");
+      
+      if (btn.isMacro) {
+          String mJson = String(btn.macroJson);
+          mJson.replace("\"", "\\\""); // Escape quotes für JS String
+          mJson.replace("\n", " ");
+          mJson.replace("\r", "");
+          response->print(",macroJson:\""); response->print(mJson); response->print("\"");
+      } else {
+          response->print(",type:\""); response->print(btn.type); response->print("\",");
+          response->print("data:\""); response->print(btn.data); response->print("\",");
+          response->print("len:"); response->print(btn.length); response->print(",");
+          response->print("addr:\""); response->print(btn.address); response->print("\",");
+          response->print("rep:"); response->print(btn.repeat); response->print(",");
+          
+          response->print("outLabel:\""); 
+          response->print(btn.out); 
+          response->print(" (GPIO ");
+          switch(btn.out) {
+              case 1: response->print(pins1); break;
+              case 2: response->print(pins2); break;
+              case 3: response->print(pins3); break;
+              case 4: response->print(pins4); break;
+              default: response->print("?"); break;
+          }
+          response->print(")\"");
+      }
+      response->print("}");
+  }
+  response->print("];\n</script>\n");
+
   // --- ANZEIGE DER BUTTONS ---
   response->print("          <h2>Current Active Buttons</h2>\n");
   response->print("          <table class='table table-striped table-condensed' style='font-size: 0.9em;'>\n");
   // --- Tabellenkopf ---
   response->print("            <thead><tr><th>ID</th><th>Name</th><th>Row</th><th>Col</th><th>Color</th><th>Type</th><th>Data/Macro Preview</th><th>Mode</th><th>Actions</th></tr></thead>\n"); // <-- NEUE SPALTE: Color
-  response->print("            <tbody>\n");
-
-  if (!buttonConfigs.empty()) {
-    for (size_t i = 0; i < buttonConfigs.size(); ++i) {
-      const auto& button = buttonConfigs[i];
-
-      // Nur konfigurierte Buttons anzeigen
-      if (!button.configured) continue;
-
-      response->print("              <tr>\n");
-      // --- KORRIGIERTE Reihenfolge und Inhalt der Zellen ---
-      response->print("                <td>" + String(i) + "</td>\n"); // ID
-      response->print("                <td>" + String(button.name) + "</td>\n"); // Name
-      response->print("                <td>" + String(button.layoutRow) + "</td>\n"); // Row
-      response->print("                <td>" + String(button.layoutCol) + "</td>\n"); // Col
-      response->print("                <td><span class='label " + String(button.colorClass) + "'>" + String(button.colorClass) + "</span></td>\n"); // Zeigt Klasse mit Farb-Badge
-
-
-      // Conditional columns based on mode
-      if (button.isMacro) {
-          response->print("                <td><code>-</code></td>\n"); // Type (N/A for Macro)
-          // Macro Preview
-          String macroSnippet = String(button.macroJson);
-          if (macroSnippet.length() > 50) { // Gekürzte Vorschau
-              macroSnippet = macroSnippet.substring(0, 47) + "...";
-          }
-          response->print("                <td><pre style='margin:0; padding: 2px; font-size: 0.9em;'>" + macroSnippet + "</pre></td>\n"); // Data/Macro Preview
-          response->print("                <td>Macro</td>\n"); // Mode
-      } else {
-          response->print("                <td><code>" + String(button.type) + "</code></td>\n"); // Type
-          // Single IR Preview (kombiniert)
-          String singlePreview = "D:<code>" + String(button.data) + "</code> L:" + String(button.length) + " A:<code>" + (String(button.address).length() > 0 ? String(button.address) : "-") + "</code> R:" + String(button.repeat) + " O:" + String(button.out);
-          response->print("                <td>" + singlePreview + "</td>\n"); // Data/Macro Preview
-          response->print("                <td>Single IR</td>\n"); // Mode
-      }
-
-      // Actions Spalte (bleibt gleich)
-      response->print("                <td>\n");
-      response->print("                  <a href='/editbutton?id=" + String(i) + "' class='btn btn-xs btn-warning' style='margin-right: 3px;'>Edit</a>\n");
-      // Verwende POST für Delete, wenn möglich, aber behalte GET für jetzt bei, wie im bestehenden Code
-      response->print("                  <a href='/deletebutton?id=" + String(i) + "' class='btn btn-xs btn-danger' onclick='return confirm(\"Are you sure you want to delete button \\'" + String(button.name) + "\\'?\");'>Delete</a>\n");
-      response->print("                </td>\n");
-      response->print("              </tr>\n");
-      yield(); // Wichtig bei vielen Buttons
-    }
-  } else {
-    // --- colspan ---
-    response->print("              <tr><td colspan='9' class='text-center'><em>No active buttons configured.</em></td></tr>\n"); // 9 Spalten jetzt
-  }
-
+  response->print("            <tbody id='config-buttons-table-body'>\n");
+  response->print("              <tr><td colspan='9' class='text-center'><em>Loading configuration...</em></td></tr>\n");
   response->print("            </tbody>\n");
   response->print("          </table>\n");
   // --- ENDE KORRIGIERTE BUTTON-TABELLE ---
@@ -3125,8 +3327,7 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   response->print("              <label for='type' class='col-sm-2 control-label'>Type</label>\n");
   response->print("              <div class='col-sm-10'>\n");
   // --- Globale Funktion aufrufen ---
-  // Übergibt "type" als Namen des Select-Elements und lastEncoding als vorselektierten Wert
-  response->print(generateTypeDropdownHtml("type", lastEncoding));
+  response->print("                <select class='form-control' id='type' name='type' data-type='ir-type' data-selected='" + lastEncoding + "'></select>\n");
   response->print("              </div>\n");
   response->print("            </div>\n");
 
@@ -3159,8 +3360,8 @@ void sendButtonConfigPage(AsyncWebServerRequest *request) {
   response->print("              <label for='out' class='col-sm-2 control-label'>Output Pin</label>\n");
   response->print("              <div class='col-sm-10'>\n");
   // --- Globale Funktion aufrufen ---
-  // Übergibt "out" als Namen und lastOut (als int konvertiert) als vorselektierten Wert
-  response->print(generateOutDropdownHtml("out", lastOut.toInt()));
+  String pinJson = "[" + String(pins1) + "," + String(pins2) + "," + String(pins3) + "," + String(pins4) + "]";
+  response->print("                <select class='form-control' id='out' name='out' data-type='out-pin' data-selected='" + lastOut + "' data-pins='" + pinJson + "'></select>\n");
   response->print("              </div>\n");
   response->print("            </div>\n");
 
@@ -3224,157 +3425,57 @@ void sendHeader(AsyncResponseStream *response) {
 // Send footer HTML (AsyncResponseStream Version) - DREI SPALTEN NEBENEINANDER
 void sendFooter(AsyncResponseStream *response) {
 
-  // --- Reihe 1: Device Info, Pin Config, Memory Usage (nebeneinander) ---
-  response->print("      <div class='row'>\n"); // <-- Die EINE Reihe für alle drei
-
-  // --- Spalte 1: Device Information ---
-  response->print("        <div class='col-md-4'>\n"); // <-- Spalte 1 (1/3 Breite)
-  response->print("          <h4>Device Information</h4>\n"); // Kleinere Überschrift (h4)
-  response->print("          <ul class='list-unstyled' style='font-size: 0.9em;'>\n"); // Kleinere Schrift
-
-  // Hostname Info
-  String hostInfo = "            <li><strong>Hostname:</strong> <a href='http://" + String(host_name) + ".local" + ":" + String(port_str) + "'>" + String(host_name) + ".local" + ":" + String(port_str) + "</a></li>\n";
-  response->print(hostInfo);
-
-  // Local IP Info
-  String localInfo = "            <li><strong>Local IP:</strong> <a href='http://" + WiFi.localIP().toString() + ":" + String(port_str) + "'>" + WiFi.localIP().toString() + ":" + String(port_str) + "</a></li>\n";
-  response->print(localInfo);
-
-  // DNS IP Info
-  String dnsInfo = "            <li><strong>DNS IP:</strong> <a href='http://" + WiFi.dnsIP().toString() + "'>" + WiFi.dnsIP().toString() + "</a></li>\n";
-  response->print(dnsInfo);
-
-  // MAC Address Info
-  String macInfo = "            <li><strong>MAC Address:</strong> <code>" + String(WiFi.macAddress()) + "</code></li>\n";
-  response->print(macInfo);
-
-  response->print("          </ul>\n");
-  response->print("        </div>\n"); // <-- Ende Spalte 1 (Device Info)
-
-  // --- Spalte 2: Pin Configuration ---
-  response->print("        <div class='col-md-4'>\n"); // <-- Spalte 2 (1/3 Breite)
-  response->print("          <h4>Pin Configuration</h4>\n"); // Kleinere Überschrift (h4)
-  response->print("          <ul class='list-unstyled' style='font-size: 0.9em;'>\n"); // Kleinere Schrift
-  response->print("            <li><span class='badge'>GPIO " + String(pinr1) + "</span> Receiving </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins1) + "</span> Transmitter 1 </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins2) + "</span> Transmitter 2 </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins3) + "</span> Transmitter 3 </li>\n");
-  response->print("            <li><span class='badge'>GPIO " + String(pins4) + "</span> Transmitter 4 </li></ul>\n");
-  response->print("        </div>\n"); // <-- Ende Spalte 2 (Pin Config)
-
-  // --- Spalte 3: Memory Usage ---
-  response->print("        <div class='col-md-4'>\n"); // <-- Spalte 3 (1/3 Breite)
-  response->print("          <h4>Memory Usage</h4>\n"); // Kleinere Überschrift (h4)
-
-  // --- Variablen und Berechnungen für Memory Usage (innerhalb der Spalte) ---
+  // --- Daten für JS sammeln ---
   char buffer[60];
-  int barWidth = 10; // Schmalere Balken für weniger Platz
-
-  // --- LittleFS ---
   uint32_t totalBytesFS = 0;
   uint32_t usedBytesFS = 0;
   float percentFS = 0;
   float usedKB_fs = 0;
-  String bar_fs = "";
-  String fsStatus = "OK";
   totalBytesFS = LittleFS.totalBytes();
   usedBytesFS = LittleFS.usedBytes();
-  if (totalBytesFS > 0) {
-      percentFS = (float)usedBytesFS / totalBytesFS * 100.0;
-      usedKB_fs = (float)usedBytesFS / 1024.0;
-      int filled = round(percentFS / 100.0 * barWidth);
-      for (int i = 0; i < barWidth; i++) { bar_fs += (i < filled) ? "=" : "-"; }
-  } else { fsStatus = "Size Error"; }
+  if (totalBytesFS > 0) { percentFS = (float)usedBytesFS / totalBytesFS * 100.0; usedKB_fs = (float)usedBytesFS / 1024.0; }
 
-  // --- Flash (Sketch) ---
   uint32_t sketchSize = ESP.getSketchSize();
   const esp_partition_t* running = esp_ota_get_running_partition();
   uint32_t totalSketchPartitionSize = 0;
   float percentFlash = 0;
   float usedKB_flash = 0;
-  String bar_flash = "";
-  String flashStatus = "OK";
   if (running != NULL) {
       totalSketchPartitionSize = running->size;
-      if (totalSketchPartitionSize > 0) {
-          percentFlash = (float)sketchSize / totalSketchPartitionSize * 100.0;
-          usedKB_flash = (float)sketchSize / 1024.0;
-          int filled = round(percentFlash / 100.0 * barWidth);
-          for (int i = 0; i < barWidth; i++) { bar_flash += (i < filled) ? "=" : "-"; }
-      } else { flashStatus = "Size Error"; }
-  } else { flashStatus = "Partition Error"; }
+      if (totalSketchPartitionSize > 0) { percentFlash = (float)sketchSize / totalSketchPartitionSize * 100.0; usedKB_flash = (float)sketchSize / 1024.0; }
+  }
 
-  // --- Heap (RAM) ---
   uint32_t totalHeap = ESP.getHeapSize();
   uint32_t freeHeap = ESP.getFreeHeap();
   uint32_t usedHeap = totalHeap - freeHeap;
   float percentHeap = 0;
   float usedKB_heap = 0;
-  String bar_heap = "";
-  if (totalHeap > 0) {
-      percentHeap = (float)usedHeap / totalHeap * 100.0;
-      usedKB_heap = (float)usedHeap / 1024.0;
-      int filled = round(percentHeap / 100.0 * barWidth);
-      for (int i = 0; i < barWidth; i++) { bar_heap += (i < filled) ? "=" : "-"; }
-  }
-  // --- ENDE Memory Usage Variablen & Berechnungen ---
+  if (totalHeap > 0) { percentHeap = (float)usedHeap / totalHeap * 100.0; usedKB_heap = (float)usedHeap / 1024.0; }
 
-  // --- Memory Usage Tabelle HTML (innerhalb der Spalte, noch kompakter) ---
-  response->print("          <table class='table table-condensed table-bordered' style='font-size: 0.8em;'>\n"); // Noch kleinere Schrift
-  response->print("            <thead>\n");
-  response->print("              <tr><th>T</th><th>Used</th><th>Total</th><th>%</th><th>Graph</th></tr>\n"); // Sehr kurze Header
-  response->print("            </thead>\n");
-  response->print("            <tbody>\n");
+  response->print("<script>\nconst footerData = {");
+  response->print("hostname:\""); response->print(host_name); response->print("\",");
+  response->print("port:\""); response->print(port_str); response->print("\",");
+  response->print("local_ip:\""); response->print(WiFi.localIP().toString()); response->print("\",");
+  response->print("dns_ip:\""); response->print(WiFi.dnsIP().toString()); response->print("\",");
+  response->print("mac:\""); response->print(WiFi.macAddress()); response->print("\",");
+  response->print("pins:{recv:"); response->print(pinr1);
+  response->print(",send1:"); response->print(pins1);
+  response->print(",send2:"); response->print(pins2);
+  response->print(",send3:"); response->print(pins3);
+  response->print(",send4:"); response->print(pins4);
+  response->print("},memory:{");
+  response->print("fs:{used:"); snprintf(buffer, sizeof(buffer), "%.0f", usedKB_fs); response->print(buffer);
+  response->print(",total:"); snprintf(buffer, sizeof(buffer), "%.0f", (float)totalBytesFS / 1024.0); response->print(buffer);
+  response->print(",pct:"); snprintf(buffer, sizeof(buffer), "%.0f", percentFS); response->print(buffer);
+  response->print("},app:{used:"); snprintf(buffer, sizeof(buffer), "%.0f", usedKB_flash); response->print(buffer);
+  response->print(",total:"); snprintf(buffer, sizeof(buffer), "%.0f", (float)totalSketchPartitionSize / 1024.0); response->print(buffer);
+  response->print(",pct:"); snprintf(buffer, sizeof(buffer), "%.0f", percentFlash); response->print(buffer);
+  response->print("},ram:{used:"); snprintf(buffer, sizeof(buffer), "%.0f", usedKB_heap); response->print(buffer);
+  response->print(",total:"); snprintf(buffer, sizeof(buffer), "%.0f", (float)totalHeap / 1024.0); response->print(buffer);
+  response->print(",pct:"); snprintf(buffer, sizeof(buffer), "%.0f", percentHeap); response->print(buffer);
+  response->print("}}};\n</script>\n");
 
-  // --- LittleFS Zeile ---
-  response->print("              <tr>\n");
-  response->print("                <td>FS</td>\n");
-  if (fsStatus == "OK" && totalBytesFS > 0) {
-      snprintf(buffer, sizeof(buffer), "%.0fK", usedKB_fs); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0fK", (float)totalBytesFS / 1024.0); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0f", percentFS); // Keine Nachkommastelle, kein %
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      response->print("                <td><samp>" + bar_fs + "</samp></td>\n");
-  } else { response->print("                <td colspan='4' class='text-danger'>" + fsStatus + "</td>\n"); }
-  response->print("              </tr>\n");
-
-  // --- Flash (Sketch) Zeile ---
-  response->print("              <tr>\n");
-  response->print("                <td>App</td>\n");
-  if (flashStatus == "OK" && totalSketchPartitionSize > 0) {
-      snprintf(buffer, sizeof(buffer), "%.0fK", usedKB_flash); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0fK", (float)totalSketchPartitionSize / 1024.0); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0f", percentFlash); // Keine Nachkommastelle, kein %
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      response->print("                <td><samp>" + bar_flash + "</samp></td>\n");
-  } else { response->print("                <td colspan='4' class='text-danger'>" + flashStatus + "</td>\n"); }
-  response->print("              </tr>\n");
-
-  // --- Heap (RAM) Zeile ---
-  response->print("              <tr>\n");
-  response->print("                <td>RAM</td>\n");
-  if (totalHeap > 0) {
-      snprintf(buffer, sizeof(buffer), "%.0fK", usedKB_heap); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0fK", (float)totalHeap / 1024.0); // Keine Nachkommastelle
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      snprintf(buffer, sizeof(buffer), "%.0f", percentHeap); // Keine Nachkommastelle, kein %
-      response->print("                <td>" + String(buffer) + "</td>\n");
-      response->print("                <td><samp>" + bar_heap + "</samp></td>\n");
-  } else { response->print("                <td colspan='4' class='text-danger'>N/A</td>\n"); }
-  response->print("              </tr>\n");
-
-  // --- Tabelle beenden ---
-  response->print("            </tbody>\n");
-  response->print("          </table>\n");
-  // --- ENDE Memory Usage Tabelle HTML ---
-
-  response->print("        </div>\n"); // <-- Ende Spalte 3 (Memory Usage)
-  response->print("      </div>\n");   // <-- Ende der EINEN Reihe
+  response->print("      <div id='footer-container'><div class='row'><div class='col-md-12 text-center'><em>Loading footer...</em></div></div></div>\n");
   response->print("      <hr />\n");   // <-- Trennlinie NACH der 3-Spalten-Reihe
 
   // --- Uptime and Epoch (bleibt darunter in eigener Reihe) ---
@@ -3396,7 +3497,7 @@ void sendFooter(AsyncResponseStream *response) {
   response->print("    </div>\n"); // Ende .container
 
   // --- Lade das generierte Skript am Ende des Body ---
-  response->print("    <script src='/js/scripts.js'></script>\n");
+  response->print("    <script src='/js/scripts.js?v=" + String(millis()) + "'></script>\n");
 
   response->print("  </body>\n");
   response->print("</html>\n");
@@ -3422,6 +3523,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
 // Hauptfunktion, die die Arbeit macht (AsyncResponseStream Version)
 void sendHomePage(AsyncWebServerRequest *request, String message, String header, int type, int httpcode) {
 
+
   yield(); // <--- Yield IMMEDIATELY upon entry
 
   // --- Erstelle den Response Stream ---
@@ -3439,199 +3541,50 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("          <script>\n");
   const size_t chunkSize = 512;
   size_t totalLength = buttonMacroJsStore.length();
+  const char* jsStorePtr = buttonMacroJsStore.c_str(); // Zeiger auf den internen Puffer
   for (size_t i = 0; i < totalLength; i += chunkSize) {
     size_t currentChunkSize = std::min(chunkSize, totalLength - i);
-    response->print(buttonMacroJsStore.substring(i, i + currentChunkSize));
-    yield();
+    response->write((const uint8_t*)(jsStorePtr + i), currentChunkSize); // Zero-Copy Write
+    // delay(1); // Entfernt, da write() schnell ist und delay() im Async-Callback schadet
   }
   response->print("          </script>\n");
 
- // +++ FERNBEDIENUNGS-BUTTONS ANZEIGEN (GRID LAYOUT - ÜBERARBEITET) +++
-
-  // --- Grid-Logik (VORBEREITUNG FÜR MAX-WIDTH) ---
-  int maxRow = -1;
-  int maxButtonsInAnyRow = 0;
-  std::vector<ButtonConfig*> buttonsWithLayout;
-  std::vector<ButtonConfig*> buttonsWithoutLayout;
-
-  // 1. Buttons sortieren und maxRow finden
-  // ... (Code zum Sortieren und maxRow finden bleibt gleich) ...
-  for (auto& button : buttonConfigs) {
-    if (button.configured) {
-        if (button.layoutRow >= 0 && button.layoutCol >= 0) {
-            buttonsWithLayout.push_back(&button);
-            if (button.layoutRow > maxRow) maxRow = button.layoutRow;
-        } else {
-            buttonsWithoutLayout.push_back(&button);
-        }
-    }
-  }
-  Serial.printf("    Grid Layout: Max Row = %d\n", maxRow);
-
-
-  // --- Maximale Anzahl Buttons pro Zeile ermitteln ---
-  // ... (Code zum Ermitteln von maxButtonsInAnyRow bleibt gleich) ...
-  if (maxRow >= 0) {
-      for (int r = 0; r <= maxRow; ++r) {
-          int countInThisRow = 0;
-          for (auto* p : buttonsWithLayout) {
-              if (p->layoutRow == r) {
-                  countInThisRow++;
-              }
-          }
-          maxButtonsInAnyRow = std::max(maxButtonsInAnyRow, countInThisRow);
+  // +++ NEU: JSON-Daten für Buttons streamen (statt HTML generieren) +++
+  response->print("<script>\nconst remoteButtons = [");
+  bool firstBtn = true;
+  for (size_t i = 0; i < buttonConfigs.size(); ++i) {
+      const auto& btn = buttonConfigs[i];
+      if (!btn.configured) continue;
+      if (!firstBtn) response->print(",");
+      firstBtn = false;
+      
+      response->print("{");
+      response->print("id:'btn_"); response->print(i); response->print("',");
+      String safeName = String(btn.name);
+      safeName.replace("\"", "\\\"");
+      response->print("name:\""); response->print(safeName); response->print("\",");
+      response->print("color:\""); response->print(btn.colorClass); response->print("\",");
+      response->print("row:"); response->print(btn.layoutRow); response->print(",");
+      response->print("col:"); response->print(btn.layoutCol); response->print(",");
+      response->print("macro:"); response->print(btn.isMacro ? "true" : "false");
+      if (!btn.isMacro) {
+          response->print(",type:\""); response->print(btn.type); response->print("\",");
+          response->print("data:\""); response->print(btn.data); response->print("\",");
+          response->print("len:"); response->print(btn.length); response->print(",");
+          response->print("addr:\""); response->print(btn.address); response->print("\",");
+          response->print("rep:"); response->print(btn.repeat); response->print(",");
+          response->print("out:"); response->print(btn.out);
       }
+      response->print("}");
   }
-  Serial.printf("    Grid Layout: Max Buttons in any Row = %d\n", maxButtonsInAnyRow);
+  response->print("];\n</script>\n");
 
-
-  // --- Container-Div mit dynamischer max-width ---
-  // ... (Code für remoteButtonsDivStyle bleibt gleich) ...
+  // --- Leerer Container für JS-Rendering ---
   response->print("      <div class='row'>\n");
-  String remoteButtonsDivStyle = "";
-  if (maxButtonsInAnyRow > 0) {
-      int calculatedMaxWidth = maxButtonsInAnyRow * BUTTON_WIDTH_PX;
-      remoteButtonsDivStyle = " style='max-width: " + String(calculatedMaxWidth) + "px; margin-left: auto; margin-right: auto;'";
-  }
-  response->print("        <div class='col-md-12' id='remote-buttons'" + remoteButtonsDivStyle + ">\n");
-  response->print("          <h3>Remote Buttons</h3>\n");
-
-
-  // 2. Grid generieren (wenn Layout-Buttons vorhanden sind)
-  if (maxRow >= 0) {
-    for (int r = 0; r <= maxRow; ++r) {
-        // --- Finde alle Buttons für DIESE Zeile 'r' ---
-        // ... (Code zum Füllen von buttonsInThisRow und maxColInThisRow bleibt gleich) ...
-        std::vector<ButtonConfig*> buttonsInThisRow;
-        int maxColInThisRow = -1;
-        for (auto* p : buttonsWithLayout) {
-            if (p->layoutRow == r) {
-                buttonsInThisRow.push_back(p);
-                if (p->layoutCol > maxColInThisRow) {
-                    maxColInThisRow = p->layoutCol;
-                }
-            }
-        }
-
-        if (buttonsInThisRow.empty()) { continue; } // Überspringen, wenn leer
-
-        // --- Generiere die Reihe ---
-        response->print("          <div class='row' style='margin-bottom: 10px;'>\n");
-
-        size_t countInRow = buttonsInThisRow.size();
-
-        if (countInRow == 1) {
-            // --- Fall 1: Nur EIN Button in dieser Zeile -> Volle Breite ---
-            ButtonConfig* btnPtr = buttonsInThisRow[0];
-            const ButtonConfig& button = *btnPtr;
-            String buttonId = "btn_" + String(std::distance(buttonConfigs.data(), btnPtr));
-
-            response->print("            <div class='col-xs-12 text-center'>\n");
-
-            // Button HTML generieren
-            String buttonHtml = "<button id='" + buttonId + "' class='btn " + String(button.colorClass) + " btn-lg remote-button' style='margin: 2px; width: 90%;' ";
-            // --- HIER DATA ATTRIBUTE EINFÜGEN ---
-            buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
-            if (!button.isMacro) {
-                buttonHtml += "data-type='" + String(button.type) + "' ";
-                buttonHtml += "data-data='" + String(button.data) + "' ";
-                buttonHtml += "data-length='" + String(button.length) + "' ";
-                buttonHtml += "data-address='" + String(button.address) + "' ";
-                buttonHtml += "data-repeat='" + String(button.repeat) + "' ";
-                buttonHtml += "data-out='" + String(button.out) + "'";
-            }
-            // --- ENDE DATA ATTRIBUTE ---
-            buttonHtml += ">";
-            buttonHtml += String(button.name);
-            buttonHtml += "</button>\n";
-            response->print(buttonHtml);
-
-            response->print("            </div>\n");
-
-        } else {
-            // --- Fall 2: MEHRERE Buttons in dieser Zeile -> Platz teilen ---
-            int numColsToUse = maxColInThisRow + 1;
-            int colsPerButton = std::max(1, 12 / numColsToUse);
-            String colClass = "col-xs-" + String(colsPerButton) + " text-center";
-
-            // Iteriere durch die Spalten DIESER Zeile
-            for (int c = 0; c <= maxColInThisRow; ++c) {
-                ButtonConfig* btnPtr = nullptr;
-                for (auto* p : buttonsInThisRow) {
-                    if (p->layoutCol == c) { btnPtr = p; break; }
-                }
-
-                response->print("            <div class='" + colClass + "'>\n");
-                if (btnPtr != nullptr) {
-                    // Button gefunden -> HTML generieren
-                    const ButtonConfig& button = *btnPtr;
-                    String buttonId = "btn_" + String(std::distance(buttonConfigs.data(), btnPtr));
-
-                    String buttonHtml = "<button id='" + buttonId + "' class='btn " + String(button.colorClass) + " btn-lg remote-button' style='margin: 2px;' ";
-                    // --- HIER DATA ATTRIBUTE EINFÜGEN ---
-                    buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
-                    if (!button.isMacro) {
-                        buttonHtml += "data-type='" + String(button.type) + "' ";
-                        buttonHtml += "data-data='" + String(button.data) + "' ";
-                        buttonHtml += "data-length='" + String(button.length) + "' ";
-                        buttonHtml += "data-address='" + String(button.address) + "' ";
-                        buttonHtml += "data-repeat='" + String(button.repeat) + "' ";
-                        buttonHtml += "data-out='" + String(button.out) + "'";
-                    }
-                    // --- ENDE DATA ATTRIBUTE ---
-                    buttonHtml += ">";
-                    buttonHtml += String(button.name);
-                    buttonHtml += "</button>\n";
-                    response->print(buttonHtml);
-                } else {
-                    response->print("&nbsp;"); // Platzhalter
-                }
-                response->print("            </div>\n");
-                yield();
-            } // Ende Spalten-Loop (c)
-        } // Ende else (countInRow > 1)
-
-        response->print("          </div>\n"); // Bootstrap-Reihe schließen
-        yield();
-    } // Ende Zeilen-Loop (r)
-    response->print("<hr/>");
-  } // Ende if (maxRow >= 0)
-
-  // 3. Buttons ohne Layout-Info anhängen (Standardfluss - bleibt unverändert)
-  if (!buttonsWithoutLayout.empty()) {
-    // ... (Dieser Block ist korrekt und enthält die data-* Attribute) ...
-    response->print("          <div class='row'>\n");
-    response->print("            <div class='col-xs-12'>\n");
-    response->print("              <h4>Other Buttons:</h4>\n");
-    for (auto* btnPtr : buttonsWithoutLayout) {
-        const ButtonConfig& button = *btnPtr;
-        String buttonId = "btn_" + String(std::distance(buttonConfigs.data(), btnPtr));
-        String buttonHtml = "<button id='" + buttonId + "' class='btn " + String(button.colorClass) + " btn-lg remote-button' style='margin: 5px;' ";
-        buttonHtml += "data-ismacro='" + String(button.isMacro ? "true" : "false") + "' ";
-        if (!button.isMacro) {
-            buttonHtml += "data-type='" + String(button.type) + "' ";
-            buttonHtml += "data-data='" + String(button.data) + "' ";
-            buttonHtml += "data-length='" + String(button.length) + "' ";
-            buttonHtml += "data-address='" + String(button.address) + "' ";
-            buttonHtml += "data-repeat='" + String(button.repeat) + "' ";
-            buttonHtml += "data-out='" + String(button.out) + "'";
-        }
-        buttonHtml += ">";
-        buttonHtml += String(button.name);
-        buttonHtml += "</button>\n";
-        response->print(buttonHtml);
-        yield();
-    }
-    response->print("            </div>\n");
-    response->print("          </div><hr/>\n");
-  }
-
-  // Link zum Konfigurieren (bleibt gleich)
-  response->print("          <a href='/buttons' class='btn btn-default' style='margin: 5px;'>Configure Buttons / Send IR Code for testing</a>\n");
-
-  response->print("        </div>\n"); // Ende col-md-12 (remote-buttons container)
+  response->print("        <div class='col-md-12' id='remote-buttons'>\n");
+  response->print("          <div class='text-center'><em>Loading buttons...</em></div>\n");
+  response->print("        </div>\n");
   response->print("      </div><hr />\n"); // Ende row (remote-buttons container)
-  // +++ ENDE FERNBEDIENUNGS-BUTTONS +++
 
   yield();
 
@@ -3646,6 +3599,8 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
         response->print("      <div class='row'><div class='col-md-12'><div class='alert alert-danger'><strong>Error!</strong> Invalid form data (e.g., length 0 or empty data).</div></div></div>\n");
       } else if (status == "buttons_saved") {
         response->print("      <div class='row'><div class='col-md-12'><div class='alert alert-success'><strong>Success!</strong> Button configuration saved.</div></div></div>\n");
+      } else if (status == "config_cleared") {
+        response->print("      <div class='row'><div class='col-md-12'><div class='alert alert-success'><strong>Success!</strong> Configuration cleared.</div></div></div>\n");
       }
     }
     // +++ ENDE Feedback +++
@@ -3658,6 +3613,51 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   if (type == 3)
     response->print("      <div class='row'><div class='col-md-12'><div class='alert alert-danger'><strong>" + header + "!</strong> " + message + "</div></div></div>\n");
 
+  // --- Initial Log Data for JS ---
+  auto serializeCodeToJson = [&](const Code& code) {
+    if (!code.valid) return String("");
+    String json = "{";
+    json += "\"timestamp\":\"" + epochToString(code.timestamp) + "\",";
+    json += "\"data\":\"" + String(code.data) + "\",";
+    json += "\"encoding\":\"" + String(code.encoding) + "\",";
+    json += "\"bits\":" + String(code.bits) + ",";
+    json += "\"address\":\"" + String(code.address) + "\",";
+    json += "\"repeat\":" + String(code.repeat) + ",";
+    json += "\"out\":" + String(code.out);
+    const ButtonConfig* matchedButton = findMatchingButton(code);
+    if (matchedButton) {
+      String safeName = String(matchedButton->name);
+      safeName.replace("\"", "\\\"");
+      json += ",\"matchedButtonName\":\"" + safeName + "\"";
+      json += ",\"matchedButtonColor\":\"" + String(matchedButton->colorClass) + "\"";
+    }
+    json += "}";
+    return json;
+  };
+
+  response->print("<script>\n");
+  response->print("const initialSentCodes = [");
+  const Code* sentCodes[] = {&last_send, &last_send_2, &last_send_3, &last_send_4, &last_send_5};
+  bool first = true;
+  for (const auto& codePtr : sentCodes) {
+    if (codePtr->valid) {
+      if (!first) response->print(",");
+      response->print(serializeCodeToJson(*codePtr));
+      first = false;
+    }
+  }
+  response->print("];\nconst initialReceivedCodes = [");
+  const Code* recvCodes[] = {&last_recv, &last_recv_2, &last_recv_3, &last_recv_4, &last_recv_5};
+  first = true;
+  for (const auto& codePtr : recvCodes) {
+    if (codePtr->valid) {
+      if (!first) response->print(",");
+      response->print(serializeCodeToJson(*codePtr));
+      first = false;
+    }
+  }
+  response->print("];\n</script>\n");
+
   // --- Codes Transmitted Table ---
   response->print("      <div class='row'>\n");
   response->print("        <div class='col-md-12'>\n");
@@ -3665,41 +3665,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("          <table class='table table-striped' style='table-layout: fixed;'>\n");
   response->print("            <thead><tr><th>Sent</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th><th>Repeat</th><th>Out</th><th>Button Match</th></tr></thead>\n");
   response->print("            <tbody id='sent-codes-body'>\n");
-  auto generateSentRow = [&](const Code& code) {
-      if (code.valid) {
-          const ButtonConfig* matchedButton = findMatchingButton(code); // <-- Aufruf der neuen Funktion
-          String matchCell = "<td>-</td>"; // Default
-          if (matchedButton != nullptr) {
-              // --- Bootstrap Label-Klasse aus Button-Klasse ableiten ---
-              // Bootstrap Labels verwenden label-primary, label-success etc.
-              String labelClass = String(matchedButton->colorClass);
-              labelClass.replace("btn-", "label-"); // Ersetze "btn-" durch "label-"
-              // --- Ende Ableitung ---
-              matchCell = "<td><span class='label " + labelClass + "'>" + String(matchedButton->name) + "</span></td>"; // <-- Verwende Name und abgeleitete Klasse
-          }
-          // Generiere die Zeile mit der (ggf. aktualisierten) matchCell
-          String rowHtml = "              <tr class='text-uppercase'><td>" + epochToString(code.timestamp) + "</td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td><td><code>" + String(code.repeat) + "</code></td><td><code>" + String(code.out) + "</code></td>" + matchCell + "</tr>\n"; // <-- matchCell am Ende
-          response->print(rowHtml);
-      }
-  };
-
-
-  generateSentRow(last_send);
-  yield();
-  generateSentRow(last_send_2);
-  yield(); 
-  generateSentRow(last_send_3);
-  yield();
-  generateSentRow(last_send_4);
-  yield();
-  generateSentRow(last_send_5);
-  yield(); 
-
-  // --- Add Log after lambda calls ---
-  // Serial.println("    Finished generating Sent Codes rows.");
-
   // Platzhalterzeile mit ID versehen
-  if (!last_send.valid && !last_send_2.valid && !last_send_3.valid && !last_send_4.valid && !last_send_5.valid)
   response->print("              <tr id='no-sent-codes'><td colspan='8' class='text-center'><em>No codes sent</em></td></tr>"); // <-- colspan="8"
   response->print("            </tbody></table>\n");
   response->print("          </div></div>\n");
@@ -3713,51 +3679,7 @@ void sendHomePage(AsyncWebServerRequest *request, String message, String header,
   response->print("          <table class='table table-striped' style='table-layout: fixed;'>\n");
   response->print("            <thead><tr><th>Received</th><th>Command</th><th>Type</th><th>Length</th><th>Address</th><th>Button Match</th></tr></thead>\n");
   response->print("            <tbody id='received-codes-body'>\n");
-  auto generateReceivedRow = [&](const Code& code, int id) {
-      if (code.valid) {
-          const ButtonConfig* matchedButton = findMatchingButton(code);
-          String matchCell = ""; // Leeren String initialisieren
-
-          if (matchedButton != nullptr) {
-              // --- Match gefunden: Farbigen Label anzeigen ---
-              String labelClass = String(matchedButton->colorClass);
-              labelClass.replace("btn-", "label-");
-              matchCell = "<td><span class='label " + labelClass + "'>" + String(matchedButton->name) + "</span></td>";
-          } else {
-              // --- KEIN Match gefunden: "Create Button"-Link anzeigen ---
-              // Baue die URL mit Prefill-Parametern
-              String createUrl = "/addbutton?";
-              createUrl += "prefill_type=" + String(code.encoding);
-              createUrl += "&prefill_data=" + String(code.data);
-              createUrl += "&prefill_length=" + String(code.bits);
-              // Adresse nur hinzufügen, wenn sie nicht "0x0" oder leer ist (optional, aber sauberer)
-              String normAddr = normalizeHex(String(code.address));
-              if (normAddr.length() > 0 && normAddr != "0") {
-                 createUrl += "&prefill_address=" + String(code.address); // Originalformat beibehalten
-              }
-              // Optional: Weitere Defaults wie repeat=1, out=1 könnten hier auch gesetzt werden
-
-              matchCell = "<td><a href='" + createUrl + "' class='btn btn-xs btn-success' title='Create button from this code'>🆕 Create Button</a></td>";
-          }
-
-          // Generiere die Zeile mit der matchCell
-          String rowHtml = "              <tr class='text-uppercase'><td><a href='/received?id=" + String(id) + "'>" + epochToString(code.timestamp) + "</a></td><td><code>" + String(code.data) + "</code></td><td><code>" + String(code.encoding) + "</code></td><td><code>" + String(code.bits) + "</code></td><td><code>" + String(code.address) + "</code></td>" + matchCell + "</tr>\n";
-          response->print(rowHtml);
-      }
-  };
-  generateReceivedRow(last_recv, 1);
-  yield();
-  generateReceivedRow(last_recv_2, 2);
-  yield();
-  generateReceivedRow(last_recv_3, 3);
-  yield();
-  generateReceivedRow(last_recv_4, 4);
-  yield();
-  generateReceivedRow(last_recv_5, 5);
-  yield();
-
   // Platzhalterzeile mit ID versehen
-  if (!last_recv.valid && !last_recv_2.valid && !last_recv_3.valid && !last_recv_4.valid && !last_recv_5.valid)
   response->print("              <tr id='no-received-codes'><td colspan='6' class='text-center'><em>No codes received</em></td></tr>"); // <-- colspan="6"
   response->print("            </tbody></table>\n");
   response->print("          </div></div><hr />\n");
