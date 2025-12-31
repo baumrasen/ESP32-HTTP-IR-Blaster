@@ -56,7 +56,7 @@
         "out": 1,
         "macroJson": "",
         "layoutRow": 0,
-        "layoutCol": 2,
+        "layoutCol": 1,
         "colorClass": "btn-info"
     },
     {
@@ -71,7 +71,7 @@
         "out": 1,
         "macroJson": "",
         "layoutRow": 1,
-        "layoutCol": 1,
+        "layoutCol": 0,
         "colorClass": "btn-primary"
     },
     {
@@ -101,7 +101,7 @@
         "out": 1,
         "macroJson": "",
         "layoutRow": 3,
-        "layoutCol": 1,
+        "layoutCol": 0,
         "colorClass": "btn-primary"
     },
     {
